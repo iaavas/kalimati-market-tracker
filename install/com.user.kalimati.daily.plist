@@ -1,0 +1,37 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.user.kalimati.daily</string>
+
+  <key>ProgramArguments</key>
+  <array>
+    <string>/Users/CHANGE_ME/Documents/Developer/kalimati/.venv/bin/python</string>
+    <string>/Users/CHANGE_ME/Documents/Developer/kalimati/scripts/daily_job.py</string>
+  </array>
+
+  <key>WorkingDirectory</key>
+  <string>/Users/CHANGE_ME/Documents/Developer/kalimati</string>
+
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>PATH</key>
+    <string>/usr/bin:/bin:/usr/sbin:/sbin</string>
+  </dict>
+
+  <!-- Daily at 09:15 Asia/Kathmandu is 03:30 UTC during standard time; adjust as needed. -->
+  <key>StartCalendarInterval</key>
+  <dict>
+    <key>Hour</key>
+    <integer>3</integer>
+    <key>Minute</key>
+    <integer>30</integer>
+  </dict>
+
+  <key>StandardOutPath</key>
+  <string>/Users/CHANGE_ME/Documents/Developer/kalimati/logs/daily.out</string>
+  <key>StandardErrorPath</key>
+  <string>/Users/CHANGE_ME/Documents/Developer/kalimati/logs/daily.err</string>
+</dict>
+</plist>

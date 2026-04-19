@@ -1,0 +1,47 @@
+Kalimati daily price tracker
+============================
+
+What it does
+------------
+1) Downloads https://kalimatimarket.gov.np/ and parses table#commodityDailyPrice.
+2) Stores min/max/average prices per commodity per day in SQLite (data/prices.db).
+3) If any commodity's minimum price drops vs the most recent prior day in the DB, it can notify via:
+   - ntfy.sh (set KALIMATI_NTFY_TOPIC), and/or
+   - a JSON webhook (set KALIMATI_WEBHOOK_URL).
+4) Writes Facebook-ready PNG grids to output/YYYY-MM-DD/page-01.png (and optionally uploads if Facebook env vars are set).
+5) Local trend dashboard: python -m kalimati dashboard
+
+Setup
+-----
+python3 -m venv .venv
+source .venv/bin/activate
+pip install -r requirements.txt
+cp .env.example .env
+
+Optional: install a Devanagari-capable font if PNGs show tofu boxes (macOS usually has one already).
+
+Run once manually
+-----------------
+python scripts/daily_job.py
+
+macOS background scheduling (launchd)
+-------------------------------------
+1) Edit paths in install/com.user.kalimati.daily.plist
+2) mkdir -p logs
+3) cp install/com.user.kalimati.daily.plist ~/Library/LaunchAgents/
+4) launchctl load ~/Library/LaunchAgents/com.user.kalimati.daily.plist
+
+Dashboard in the background
+-----------------------------
+chmod +x scripts/start_dashboard_background.sh
+./scripts/start_dashboard_background.sh
+
+Open http://127.0.0.1:8765/
+
+Facebook upload (optional)
+--------------------------
+Create a Page access token with pages_manage_posts and set:
+KALIMATI_FACEBOOK_PAGE_ID
+KALIMATI_FACEBOOK_ACCESS_TOKEN
+
+If unset, PNGs are still generated locally for manual posting.

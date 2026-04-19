@@ -1,0 +1,3 @@
+# Run once per day after Kalimati publishes (adjust time/timezone to your server).
+# This example assumes cron's machine timezone matches when you want the snapshot.
+15 9 * * * cd /Users/CHANGE_ME/Documents/Developer/kalimati && .venv/bin/python scripts/daily_job.py >>logs/cron.log 2>&1
