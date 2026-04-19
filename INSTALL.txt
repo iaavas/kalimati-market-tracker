@@ -1,47 +1,73 @@
 Kalimati daily price tracker
 ============================
+(Full platform guide: see README.md in the repo root.)
 
 What it does
 ------------
 1) Downloads https://kalimatimarket.gov.np/ and parses table#commodityDailyPrice.
 2) Stores min/max/average prices per commodity per day in SQLite (data/prices.db).
-3) If any commodity's minimum price drops vs the most recent prior day in the DB, it can notify via:
-   - ntfy.sh (set KALIMATI_NTFY_TOPIC), and/or
-   - a JSON webhook (set KALIMATI_WEBHOOK_URL).
-4) Writes Facebook-ready PNG grids to output/YYYY-MM-DD/page-01.png (and optionally uploads if Facebook env vars are set).
-5) Local trend dashboard: python -m kalimati dashboard
+3) Optional alerts when min price drops vs the prior day: ntfy, webhook, and/or native OS notifications.
+4) Writes PNG posters under output/YYYY-MM-DD/page-NN.png (and optional Facebook upload).
+5) Local dashboard: python -m kalimati dashboard
 
 Setup
 -----
 python3 -m venv .venv
-source .venv/bin/activate
+source .venv/bin/activate   # Windows: .venv\Scripts\activate
 pip install -r requirements.txt
 cp .env.example .env
 
-Optional: install a Devanagari-capable font if PNGs show tofu boxes (macOS usually has one already).
+Scheduled runs (7:00 sync · 7:30 AM / 7:30 PM digests)
+------------------------------------------------------
+All times below are **the computer’s local wall clock** unless you set
+``CRON_TZ`` (Linux) or match the Mac’s timezone to Nepal.
 
-Run once manually
------------------
+Entry point (same Python on every OS):
+
+  .venv/bin/python scripts/kalimati_schedule.py sync        # fetch + DB + PNGs + drop alerts
+  .venv/bin/python scripts/kalimati_schedule.py digest-am   # **always** OS notification (summary)
+  .venv/bin/python scripts/kalimati_schedule.py digest-pm   # **always** OS notification (summary)
+
+macOS (launchd)
+~~~~~~~~~~~~~~~
+1) Edit paths in each file under ``install/macos/`` (three plists).
+2) ``mkdir -p logs``
+3) Copy plists to LaunchAgents and load::
+
+     cp install/macos/com.user.kalimati.sync.plist ~/Library/LaunchAgents/
+     cp install/macos/com.user.kalimati.digest.am.plist ~/Library/LaunchAgents/
+     cp install/macos/com.user.kalimati.digest.pm.plist ~/Library/LaunchAgents/
+     launchctl load ~/Library/LaunchAgents/com.user.kalimati.sync.plist
+     launchctl load ~/Library/LaunchAgents/com.user.kalimati.digest.am.plist
+     launchctl load ~/Library/LaunchAgents/com.user.kalimati.digest.pm.plist
+
+4) Allow notifications for **Terminal** / **Python** (or the parent app launchd uses) in
+   System Settings → Notifications.
+
+Linux (cron)
+~~~~~~~~~~~~
+See ``install/crontab.example``. Use ``CRON_TZ=Asia/Kathmandu`` at the top of the crontab if
+the machine should interpret 07:00 as Nepal time. Install ``notify-send`` (libnotify) for
+desktop notifications; set ``KALIMATI_SYSTEM_NOTIFY=1`` in ``.env`` for non-macOS.
+
+Windows (Task Scheduler)
+~~~~~~~~~~~~~~~~~~~~~~~~
+1) Ensure ``.venv`` exists at the repo root.
+2) Open **PowerShell as Administrator**, ``cd`` to the repo, run::
+
+     Set-ExecutionPolicy -Scope Process Bypass
+     .\install\windows\register_tasks.ps1
+
+3) First run may require allowing Python in **Windows notifications** settings.
+
+Manual run once
+---------------
 python scripts/daily_job.py
 
-macOS background scheduling (launchd)
--------------------------------------
-1) Edit paths in install/com.user.kalimati.daily.plist
-2) mkdir -p logs
-3) cp install/com.user.kalimati.daily.plist ~/Library/LaunchAgents/
-4) launchctl load ~/Library/LaunchAgents/com.user.kalimati.daily.plist
-
-Dashboard in the background
------------------------------
-chmod +x scripts/start_dashboard_background.sh
-./scripts/start_dashboard_background.sh
-
-Open http://127.0.0.1:8765/
+Notifications demo
+--------------------
+.venv/bin/python scripts/demo_notify.py
 
 Facebook upload (optional)
 --------------------------
-Create a Page access token with pages_manage_posts and set:
-KALIMATI_FACEBOOK_PAGE_ID
-KALIMATI_FACEBOOK_ACCESS_TOKEN
-
-If unset, PNGs are still generated locally for manual posting.
+KALIMATI_FACEBOOK_PAGE_ID and KALIMATI_FACEBOOK_ACCESS_TOKEN in .env.

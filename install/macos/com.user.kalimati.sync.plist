@@ -3,35 +3,29 @@
 <plist version="1.0">
 <dict>
   <key>Label</key>
-  <string>com.user.kalimati.daily</string>
-
+  <string>com.user.kalimati.sync</string>
   <key>ProgramArguments</key>
   <array>
     <string>/Users/CHANGE_ME/Documents/Developer/kalimati/.venv/bin/python</string>
-    <string>/Users/CHANGE_ME/Documents/Developer/kalimati/scripts/daily_job.py</string>
+    <string>/Users/CHANGE_ME/Documents/Developer/kalimati/scripts/kalimati_schedule.py</string>
+    <string>sync</string>
   </array>
-
   <key>WorkingDirectory</key>
   <string>/Users/CHANGE_ME/Documents/Developer/kalimati</string>
-
   <key>EnvironmentVariables</key>
   <dict>
     <key>PATH</key>
     <string>/usr/bin:/bin:/usr/sbin:/sbin</string>
   </dict>
-
-  <!-- Daily at 09:15 Asia/Kathmandu is 03:30 UTC during standard time; adjust as needed. -->
+  <!-- Local wall clock: 07:00 (set Mac timezone to Asia/Kathmandu if you want Nepal civil time). -->
   <key>StartCalendarInterval</key>
   <dict>
-    <key>Hour</key>
-    <integer>3</integer>
-    <key>Minute</key>
-    <integer>30</integer>
+    <key>Hour</key><integer>7</integer>
+    <key>Minute</key><integer>0</integer>
   </dict>
-
   <key>StandardOutPath</key>
-  <string>/Users/CHANGE_ME/Documents/Developer/kalimati/logs/daily.out</string>
+  <string>/Users/CHANGE_ME/Documents/Developer/kalimati/logs/sync.out</string>
   <key>StandardErrorPath</key>
-  <string>/Users/CHANGE_ME/Documents/Developer/kalimati/logs/daily.err</string>
+  <string>/Users/CHANGE_ME/Documents/Developer/kalimati/logs/sync.err</string>
 </dict>
 </plist>

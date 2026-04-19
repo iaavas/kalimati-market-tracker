@@ -1,3 +1,15 @@
-# Run once per day after Kalimati publishes (adjust time/timezone to your server).
-# This example assumes cron's machine timezone matches when you want the snapshot.
-15 9 * * * cd /Users/CHANGE_ME/Documents/Developer/kalimati && .venv/bin/python scripts/daily_job.py >>logs/cron.log 2>&1
+# Kalimati — example cron (times are in the timezone of the cron daemon; use CRON_TZ for Nepal).
+# Install: crontab -e  and paste adjusted lines.
+#
+# CRON_TZ=Asia/Kathmandu
+SHELL=/bin/bash
+PATH=/usr/bin:/bin
+
+# 07:00 — fetch prices, SQLite, PNGs, optional ntfy/webhook on drops
+0 7 * * * cd /path/to/kalimati && .venv/bin/python scripts/kalimati_schedule.py sync >>logs/cron-sync.log 2>&1
+
+# 07:30 — always show OS notification (summary)
+30 7 * * * cd /path/to/kalimati && .venv/bin/python scripts/kalimati_schedule.py digest-am >>logs/cron-digest.log 2>&1
+
+# 19:30 — evening summary notification
+30 19 * * * cd /path/to/kalimati && .venv/bin/python scripts/kalimati_schedule.py digest-pm >>logs/cron-digest.log 2>&1

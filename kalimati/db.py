@@ -126,3 +126,57 @@ def series_for_commodity(commodity: str, path: Path | None = None) -> list[dict]
             (commodity,),
         )
         return [dict(row) for row in cur.fetchall()]
+
+
+def digest_stats(path: Path | None = None) -> dict:
+    """Summary for scheduled AM/PM system notifications (latest day vs prior)."""
+    with connect(path) as conn:
+        max_day = conn.execute("SELECT MAX(day) FROM daily_prices").fetchone()[0]
+        if not max_day:
+            return {"has_data": False}
+
+        n_rows = int(
+            conn.execute(
+                "SELECT COUNT(*) FROM daily_prices WHERE day=?",
+                (max_day,),
+            ).fetchone()[0]
+        )
+        prev = conn.execute(
+            "SELECT MAX(day) FROM daily_prices WHERE day < ?",
+            (max_day,),
+        ).fetchone()[0]
+
+        cheaper = higher = same = 0
+        cur_rows = conn.execute(
+            "SELECT commodity, min_price FROM daily_prices WHERE day=?",
+            (max_day,),
+        ).fetchall()
+        prev_map: dict[str, float | None] = {}
+        if prev:
+            for r in conn.execute(
+                "SELECT commodity, min_price FROM daily_prices WHERE day=?",
+                (prev,),
+            ):
+                prev_map[r["commodity"]] = r["min_price"]
+        for r in cur_rows:
+            mn = r["min_price"]
+            key = r["commodity"]
+            if key not in prev_map or prev_map[key] is None or mn is None:
+                continue
+            a, b = float(prev_map[key]), float(mn)
+            if b < a - 1e-9:
+                cheaper += 1
+            elif b > a + 1e-9:
+                higher += 1
+            else:
+                same += 1
+
+    return {
+        "has_data": True,
+        "latest_day": max_day,
+        "prior_day": prev,
+        "rows_latest": n_rows,
+        "min_cheaper": cheaper,
+        "min_higher": higher,
+        "min_same": same,
+    }
