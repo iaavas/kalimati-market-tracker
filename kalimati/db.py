@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 import sqlite3
 from contextlib import contextmanager
 from dataclasses import dataclass
@@ -115,6 +116,55 @@ def list_commodities(path: Path | None = None) -> list[str]:
             "SELECT DISTINCT commodity FROM daily_prices ORDER BY commodity COLLATE NOCASE"
         )
         return [r[0] for r in cur.fetchall()]
+
+
+def commodity_unit_from_name(commodity: str) -> str:
+    """Best-effort unit label from Kalimati commodity name (same rules as posters)."""
+    parts = re.findall(r"\(([^)]*)\)", commodity)
+    if not parts:
+        return "केजी"
+
+    def classify(inner: str) -> str | None:
+        s = inner.strip()
+        if "मुठा" in s:
+            return "मुठा"
+        if "दर्जन" in s:
+            return "दर्जन"
+        if "गोटा" in s:
+            return "गोटा"
+        if "प्रति" in s:
+            return s.replace("  ", " ")
+        compact = s.replace(" ", "").replace(".", "")
+        if "केजी" in s or "केजी" in compact:
+            return "केजी"
+        return None
+
+    for inner in reversed(parts):
+        u = classify(inner)
+        if u:
+            return u
+    return "केजी"
+
+
+def snapshot_today_prices(path: Path | None = None) -> dict[str, Any]:
+    """Latest day in DB with min / max / avg per commodity plus parsed ``unit`` for calculators."""
+    latest, _ = latest_two_days(path)
+    if latest is None:
+        return {"has_data": False}
+    rows = prices_for_day(latest, path)
+    items: list[dict[str, Any]] = []
+    for name in sorted(rows.keys(), key=str.casefold):
+        row = rows[name]
+        items.append(
+            {
+                "commodity": name,
+                "min_price": row.min_price,
+                "max_price": row.max_price,
+                "avg_price": row.avg_price,
+                "unit": commodity_unit_from_name(name),
+            }
+        )
+    return {"has_data": True, "day": latest.isoformat(), "items": items}
 
 
 def series_for_commodity(commodity: str, path: Path | None = None) -> list[dict]:

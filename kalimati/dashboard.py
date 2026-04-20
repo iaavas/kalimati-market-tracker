@@ -7,7 +7,13 @@ from typing import Any
 from flask import Flask, Response, jsonify, render_template_string, request
 
 from kalimati.config import DASHBOARD_HOST, DASHBOARD_PORT
-from kalimati.db import DB_PATH, list_commodities, series_for_commodity, snapshot_min_price_movements
+from kalimati.db import (
+    DB_PATH,
+    list_commodities,
+    series_for_commodity,
+    snapshot_min_price_movements,
+    snapshot_today_prices,
+)
 
 # --- Reusable analytics (usable from scripts/tests without Flask) -----------------
 
@@ -301,6 +307,94 @@ PAGE = """
     footer.muted a { color: var(--pbi-accent); text-decoration: none; }
     footer.muted a:hover { color: var(--pbi-accent-hover); text-decoration: underline; }
     code { font-size: 0.92em; background: #f3f2f1; padding: 2px 6px; border-radius: 2px; border: 1px solid var(--pbi-border); }
+    .calc-hint {
+      margin: 0 0 12px;
+      padding: 0 20px;
+      font-size: 12px;
+      color: var(--pbi-muted);
+      line-height: 1.45;
+    }
+    .calc-table-wrap { overflow-x: auto; padding: 0 20px; }
+    .calc-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+    .calc-table th {
+      text-align: left;
+      padding: 8px 10px;
+      border-bottom: 1px solid var(--pbi-border);
+      color: var(--pbi-muted);
+      font-size: 11px;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+    }
+    .calc-table td { padding: 8px 10px; border-bottom: 1px solid #f3f2f1; vertical-align: middle; }
+    .calc-table select {
+      min-width: 180px;
+      max-width: min(420px, 100%);
+      width: 100%;
+      height: 32px;
+      padding: 0 10px;
+      border: 1px solid #8a8886;
+      border-radius: 2px;
+      font-size: 13px;
+      font-family: inherit;
+      background: var(--pbi-card);
+    }
+    .calc-table input[type="number"] {
+      width: 110px;
+      height: 32px;
+      padding: 0 8px;
+      border: 1px solid #8a8886;
+      border-radius: 2px;
+      font-size: 14px;
+      font-family: inherit;
+    }
+    .calc-unit { color: var(--pbi-text); font-weight: 600; white-space: nowrap; }
+    .calc-remove {
+      background: var(--pbi-card);
+      border: 1px solid var(--pbi-border);
+      border-radius: 2px;
+      padding: 5px 12px;
+      cursor: pointer;
+      font-size: 12px;
+      color: var(--pbi-text);
+    }
+    .calc-remove:hover { background: #f3f2f1; }
+    .calc-add-btn {
+      margin: 4px 20px 16px;
+      height: 32px;
+      padding: 0 16px;
+      border-radius: 2px;
+      border: 1px solid var(--pbi-accent);
+      background: var(--pbi-card);
+      color: var(--pbi-accent);
+      font-weight: 600;
+      font-size: 13px;
+      cursor: pointer;
+      font-family: inherit;
+    }
+    .calc-add-btn:hover { background: #f3f9fd; }
+    .calc-totals {
+      margin: 8px 20px 18px;
+      padding: 14px 16px;
+      background: #faf9f8;
+      border: 1px solid var(--pbi-border);
+      border-radius: 2px;
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+      gap: 14px;
+    }
+    .calc-total-block .calc-total-label {
+      font-size: 11px;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      color: var(--pbi-muted);
+    }
+    .calc-total-block .calc-total-val {
+      font-size: 20px;
+      font-weight: 600;
+      color: var(--pbi-text);
+      margin-top: 4px;
+    }
   </style>
 </head>
 <body>
@@ -344,6 +438,45 @@ PAGE = """
             <div class="kpi-label">Vs prior snapshot</div>
             <div class="kpi-value" id="kpi-delta">—</div>
             <div class="kpi-foot" id="kpi-delta-note">Change in average price</div>
+          </div>
+        </div>
+      </section>
+
+      <section class="card" id="calc-card" hidden>
+        <div class="card-title-row">
+          <strong>Today's price calculator</strong>
+          <span id="calc-day">—</span>
+        </div>
+        <p class="calc-hint">
+          Add lines, enter quantity in each item's unit (e.g. केजी). Totals multiply quantity by wholesale
+          <strong>min</strong>, <strong>avg</strong>, or <strong>max</strong> from the latest day in your database.
+        </p>
+        <div class="calc-table-wrap">
+          <table class="calc-table" aria-label="Basket calculator">
+            <thead>
+              <tr>
+                <th>Item</th>
+                <th>Quantity</th>
+                <th>Unit</th>
+                <th></th>
+              </tr>
+            </thead>
+            <tbody id="calc-tbody"></tbody>
+          </table>
+        </div>
+        <button type="button" class="calc-add-btn" id="calc-add">Add item</button>
+        <div class="calc-totals">
+          <div class="calc-total-block">
+            <div class="calc-total-label">Total (min rates)</div>
+            <div class="calc-total-val" id="calc-total-min">—</div>
+          </div>
+          <div class="calc-total-block">
+            <div class="calc-total-label">Total (average rates)</div>
+            <div class="calc-total-val" id="calc-total-avg">—</div>
+          </div>
+          <div class="calc-total-block">
+            <div class="calc-total-label">Total (max rates)</div>
+            <div class="calc-total-val" id="calc-total-max">—</div>
           </div>
         </div>
       </section>
@@ -716,8 +849,148 @@ PAGE = """
       }
     }
 
+    let priceCatalog = [];
+    let priceMap = {};
+    let calcLines = [{ id: 1, commodity: '', qty: 1 }];
+    let calcNextId = 2;
+
+    function recalcTotals() {
+      let tMin = 0;
+      let tAvg = 0;
+      let tMax = 0;
+      let anyMin = false;
+      let anyAvg = false;
+      let anyMax = false;
+      for (const line of calcLines) {
+        if (!line.commodity) continue;
+        const p = priceMap[line.commodity];
+        if (!p) continue;
+        const q = Number(line.qty);
+        if (!Number.isFinite(q) || q <= 0) continue;
+        if (p.min_price != null) {
+          tMin += q * p.min_price;
+          anyMin = true;
+        }
+        if (p.avg_price != null) {
+          tAvg += q * p.avg_price;
+          anyAvg = true;
+        }
+        if (p.max_price != null) {
+          tMax += q * p.max_price;
+          anyMax = true;
+        }
+      }
+      document.getElementById('calc-total-min').textContent = anyMin ? ('NPR ' + fmtNpr(tMin)) : '—';
+      document.getElementById('calc-total-avg').textContent = anyAvg ? ('NPR ' + fmtNpr(tAvg)) : '—';
+      document.getElementById('calc-total-max').textContent = anyMax ? ('NPR ' + fmtNpr(tMax)) : '—';
+    }
+
+    function renderCalcRows() {
+      const tb = document.getElementById('calc-tbody');
+      tb.innerHTML = '';
+      for (const line of calcLines) {
+        const tr = document.createElement('tr');
+
+        const td1 = document.createElement('td');
+        const sel = document.createElement('select');
+        const opt0 = document.createElement('option');
+        opt0.value = '';
+        opt0.textContent = '— Select item —';
+        sel.appendChild(opt0);
+        for (const it of priceCatalog) {
+          const o = document.createElement('option');
+          o.value = it.commodity;
+          o.textContent = it.commodity;
+          if (it.commodity === line.commodity) o.selected = true;
+          sel.appendChild(o);
+        }
+        sel.addEventListener('change', () => {
+          line.commodity = sel.value;
+          renderCalcRows();
+          recalcTotals();
+        });
+        td1.appendChild(sel);
+
+        const td2 = document.createElement('td');
+        const inp = document.createElement('input');
+        inp.type = 'number';
+        inp.min = '0';
+        inp.step = 'any';
+        inp.value = String(line.qty);
+        inp.addEventListener('input', () => {
+          const v = parseFloat(inp.value);
+          line.qty = Number.isFinite(v) ? v : 0;
+          recalcTotals();
+        });
+        td2.appendChild(inp);
+
+        const td3 = document.createElement('td');
+        const pr = line.commodity ? priceMap[line.commodity] : null;
+        td3.textContent = pr ? pr.unit : '—';
+        td3.className = 'calc-unit';
+
+        const td4 = document.createElement('td');
+        const btn = document.createElement('button');
+        btn.type = 'button';
+        btn.className = 'calc-remove';
+        btn.textContent = 'Remove';
+        btn.addEventListener('click', () => {
+          if (calcLines.length <= 1) {
+            line.commodity = '';
+            line.qty = 1;
+            renderCalcRows();
+            recalcTotals();
+            return;
+          }
+          calcLines = calcLines.filter((l) => l.id !== line.id);
+          renderCalcRows();
+          recalcTotals();
+        });
+        td4.appendChild(btn);
+
+        tr.appendChild(td1);
+        tr.appendChild(td2);
+        tr.appendChild(td3);
+        tr.appendChild(td4);
+        tb.appendChild(tr);
+      }
+    }
+
+    async function loadTodayPrices() {
+      const card = document.getElementById('calc-card');
+      try {
+        const res = await fetch('/api/today-prices');
+        const data = await res.json();
+        if (!data.has_data) {
+          card.hidden = true;
+          return;
+        }
+        card.hidden = false;
+        document.getElementById('calc-day').textContent = data.day;
+        priceCatalog = data.items || [];
+        priceMap = {};
+        for (const it of priceCatalog) {
+          priceMap[it.commodity] = it;
+        }
+        if (calcLines.length === 1 && !calcLines[0].commodity && priceCatalog.length) {
+          calcLines[0].commodity = priceCatalog[0].commodity;
+        }
+        renderCalcRows();
+        recalcTotals();
+      } catch (e) {
+        card.hidden = true;
+      }
+    }
+
+    document.getElementById('calc-add').addEventListener('click', () => {
+      calcLines.push({ id: calcNextId++, commodity: '', qty: 1 });
+      renderCalcRows();
+      recalcTotals();
+    });
+
     loadCommodities();
     loadMovements();
+    loadTodayPrices();
   </script>
 </body>
 </html>
@@ -757,6 +1030,10 @@ def create_app(db_path: Path | None = None) -> Flask:
     @app.get("/api/movements")
     def movements() -> Response:
         return jsonify(snapshot_min_price_movements(path))
+
+    @app.get("/api/today-prices")
+    def today_prices() -> Response:
+        return jsonify(snapshot_today_prices(path))
 
     return app
 
