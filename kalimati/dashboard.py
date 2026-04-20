@@ -70,147 +70,166 @@ def compute_kpis(points: list[dict[str, Any]]) -> dict[str, Any]:
 
 # --- UI ---------------------------------------------------------------------------
 
-PAGE = """
-<!doctype html>
-<html lang="en">
-<head>
-  <meta charset="utf-8"/>
-  <meta name="viewport" content="width=device-width, initial-scale=1"/>
-  <title>Kalimati prices</title>
-  <script src="https://cdn.jsdelivr.net/npm/lightweight-charts@4.2.0/dist/lightweight-charts.standalone.production.js"></script>
-  <style>
+SHARED_CSS = """
     :root {
-      --pbi-page: #f3f2f1;
-      --pbi-card: #ffffff;
-      --pbi-border: #edebe9;
-      --pbi-text: #323130;
-      --pbi-muted: #605e5c;
-      --pbi-accent: #0078d4;
-      --pbi-accent-hover: #106ebe;
-      --positive: #107c10;
-      --negative: #a4262c;
-      --shadow-card: 0 0.6px 1.8px rgba(0, 0, 0, 0.08), 0 3.2px 7.2px rgba(0, 0, 0, 0.12);
-      --radius: 4px;
-      font-family: "Segoe UI", "Segoe UI Web (West European)", system-ui, -apple-system, sans-serif;
+      --bg: #0a0a0a;
+      --surface: #111111;
+      --surface-elev: #141414;
+      --border: #2a2a2a;
+      --border-subtle: #1a1a1a;
+      --text: #d4d4d4;
+      --muted: #737373;
+      --accent: #6b9fff;
+      --accent-dim: #4a7dcc;
+      --positive: #6ee7a8;
+      --negative: #f87171;
+      --neutral-bar: #525252;
+      --radius: 0;
+      font-family: ui-monospace, "Cascadia Code", "SF Mono", Menlo, Consolas, monospace;
+      font-size: 13px;
+      line-height: 1.45;
     }
     * { box-sizing: border-box; }
     body {
       margin: 0;
       min-height: 100vh;
-      background: var(--pbi-page);
-      color: var(--pbi-text);
-      font-size: 14px;
-      line-height: 1.45;
+      background: var(--bg);
+      color: var(--text);
     }
     .app-header {
-      background: var(--pbi-card);
-      border-bottom: 1px solid var(--pbi-border);
-      box-shadow: 0 1px 0 rgba(0, 0, 0, 0.04);
+      background: var(--surface);
+      border-bottom: 1px solid var(--border);
     }
     .app-header-inner {
       max-width: 1400px;
       margin: 0 auto;
-      padding: 16px 28px 18px;
+      padding: 14px 24px 16px;
+    }
+    .header-row {
       display: flex;
       flex-wrap: wrap;
-      align-items: flex-end;
       justify-content: space-between;
-      gap: 20px 32px;
+      align-items: flex-start;
+      gap: 16px 28px;
     }
-    .brand { display: flex; align-items: flex-start; gap: 14px; }
+    .brand { display: flex; align-items: flex-start; gap: 12px; }
     .brand-mark {
-      width: 4px;
-      min-height: 44px;
-      background: var(--pbi-accent);
-      border-radius: 2px;
+      width: 3px;
+      min-height: 40px;
+      background: var(--accent);
       margin-top: 2px;
       flex-shrink: 0;
     }
     .brand h1 {
       margin: 0;
-      font-size: 20px;
+      font-size: 15px;
       font-weight: 600;
-      color: var(--pbi-text);
-      letter-spacing: -0.01em;
+      color: var(--text);
+      letter-spacing: 0.02em;
+      text-transform: lowercase;
     }
     .brand-sub {
-      margin: 4px 0 0;
-      font-size: 12px;
-      color: var(--pbi-muted);
-      max-width: 420px;
-      line-height: 1.4;
+      margin: 6px 0 0;
+      font-size: 11px;
+      color: var(--muted);
+      max-width: 520px;
+      line-height: 1.45;
+      font-weight: 400;
+    }
+    .site-nav {
+      display: flex;
+      gap: 0;
+      align-items: center;
+      flex-shrink: 0;
+      font-size: 11px;
+      text-transform: lowercase;
+      letter-spacing: 0.06em;
+    }
+    .site-nav a {
+      color: var(--muted);
+      text-decoration: none;
+      padding: 6px 12px;
+      border: 1px solid transparent;
+      border-right: none;
+    }
+    .site-nav a:last-child { border-right: 1px solid var(--border); }
+    .site-nav a:first-child { border-left: 1px solid var(--border); }
+    .site-nav a:hover { color: var(--text); background: var(--surface-elev); }
+    .site-nav a.active {
+      color: var(--accent);
+      background: var(--bg);
+      border-color: var(--border);
     }
     .filters {
       display: flex;
       flex-wrap: wrap;
-      gap: 16px 20px;
+      gap: 14px 20px;
       align-items: flex-end;
+      margin-top: 14px;
+      padding-top: 14px;
+      border-top: 1px solid var(--border-subtle);
     }
     .field { display: flex; flex-direction: column; gap: 4px; }
     .field label {
-      font-size: 11px;
+      font-size: 10px;
       font-weight: 600;
-      color: var(--pbi-muted);
+      color: var(--muted);
       text-transform: uppercase;
-      letter-spacing: 0.04em;
+      letter-spacing: 0.08em;
     }
     select {
-      min-width: 220px;
-      height: 32px;
-      padding: 0 28px 0 10px;
-      border-radius: 2px;
-      border: 1px solid #8a8886;
-      background: var(--pbi-card);
-      color: var(--pbi-text);
-      font-size: 14px;
+      min-width: 200px;
+      height: 30px;
+      padding: 0 10px;
+      border: 1px solid var(--border);
+      background: var(--bg);
+      color: var(--text);
+      font-size: 12px;
       font-family: inherit;
       cursor: pointer;
     }
-    select:hover { border-color: var(--pbi-text); }
+    select:hover { border-color: var(--muted); }
     select:focus {
       outline: none;
-      border-color: var(--pbi-accent);
-      box-shadow: 0 0 0 1px var(--pbi-accent);
+      border-color: var(--accent);
     }
     .app-main {
       max-width: 1400px;
       margin: 0 auto;
-      padding: 20px 28px 36px;
+      padding: 18px 24px 32px;
     }
-    .content-grid { display: flex; flex-direction: column; gap: 16px; }
+    .content-grid { display: flex; flex-direction: column; gap: 14px; }
     .card {
-      background: var(--pbi-card);
-      border: 1px solid var(--pbi-border);
-      border-radius: var(--radius);
-      box-shadow: var(--shadow-card);
+      background: var(--surface);
+      border: 1px solid var(--border);
     }
-    .card-pad { padding: 16px 20px 18px; }
+    .card-pad { padding: 14px 18px 16px; }
     .kpis {
       display: grid;
-      grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
-      gap: 16px;
+      grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+      gap: 14px;
     }
     .kpi {
-      padding: 16px 18px;
-      border-left: 3px solid var(--pbi-accent);
-      background: var(--pbi-card);
+      padding: 12px 14px;
+      border-left: 2px solid var(--accent);
+      background: var(--bg);
     }
     .kpi-label {
-      font-size: 11px;
+      font-size: 10px;
       font-weight: 600;
       text-transform: uppercase;
-      letter-spacing: 0.06em;
-      color: var(--pbi-muted);
+      letter-spacing: 0.08em;
+      color: var(--muted);
     }
     .kpi-value {
       margin-top: 6px;
-      font-size: 28px;
+      font-size: 22px;
       font-weight: 600;
-      color: var(--pbi-text);
+      color: var(--text);
       letter-spacing: -0.02em;
       line-height: 1.2;
     }
-    .kpi-foot { margin-top: 8px; font-size: 12px; color: var(--pbi-muted); }
+    .kpi-foot { margin-top: 6px; font-size: 11px; color: var(--muted); }
     .kpi-delta.positive { color: var(--positive); font-weight: 600; }
     .kpi-delta.negative { color: var(--negative); font-weight: 600; }
     .card-title-row {
@@ -219,42 +238,43 @@ PAGE = """
       align-items: baseline;
       flex-wrap: wrap;
       gap: 8px 16px;
-      padding: 14px 20px 0;
-      margin-bottom: 4px;
+      padding: 12px 18px 0;
+      margin-bottom: 2px;
     }
     .card-title-row strong {
-      font-size: 14px;
+      font-size: 12px;
       font-weight: 600;
-      color: var(--pbi-text);
+      color: var(--text);
+      text-transform: lowercase;
+      letter-spacing: 0.04em;
     }
-    .card-title-row span { font-size: 12px; color: var(--pbi-muted); }
-    .chart-card .card-title-row { margin-bottom: 0; padding-bottom: 8px; }
-    .movements-card .movements-grid { padding: 8px 20px 18px; margin-top: 0; }
+    .card-title-row span { font-size: 11px; color: var(--muted); }
+    .chart-card .card-title-row { margin-bottom: 0; padding-bottom: 6px; }
+    .movements-card .movements-grid { padding: 6px 18px 14px; margin-top: 0; }
     .movements-grid {
       display: grid;
       grid-template-columns: repeat(3, 1fr);
-      gap: 12px;
+      gap: 10px;
     }
     @media (max-width: 900px) {
       .movements-grid { grid-template-columns: 1fr; }
     }
     .move-col {
-      border-radius: 2px;
-      padding: 12px 12px 10px;
-      border: 1px solid var(--pbi-border);
-      background: #faf9f8;
-      min-height: 100px;
+      padding: 10px 10px 8px;
+      border: 1px solid var(--border);
+      background: var(--bg);
+      min-height: 88px;
     }
     .move-col.move-down { border-top: 2px solid var(--positive); }
     .move-col.move-up { border-top: 2px solid var(--negative); }
-    .move-col.move-neutral { border-top: 2px solid #a19f9d; }
+    .move-col.move-neutral { border-top: 2px solid var(--neutral-bar); }
     .move-col h3 {
-      margin: 0 0 8px;
-      font-size: 11px;
+      margin: 0 0 6px;
+      font-size: 10px;
       font-weight: 600;
       text-transform: uppercase;
-      letter-spacing: 0.06em;
-      color: var(--pbi-muted);
+      letter-spacing: 0.08em;
+      color: var(--muted);
       display: flex;
       align-items: center;
       justify-content: space-between;
@@ -262,150 +282,194 @@ PAGE = """
     }
     .move-col h3 .n {
       font-weight: 600;
-      color: var(--pbi-text);
-      font-size: 13px;
+      color: var(--text);
+      font-size: 12px;
     }
     .move-col ul {
       list-style: none;
       margin: 0;
       padding: 0;
-      max-height: 260px;
+      max-height: 240px;
       overflow-y: auto;
     }
     .move-col li {
-      padding: 8px 0;
-      border-bottom: 1px solid var(--pbi-border);
-      font-size: 12px;
+      padding: 6px 0;
+      border-bottom: 1px solid var(--border-subtle);
+      font-size: 11px;
     }
     .move-col li:last-child { border-bottom: none; }
-    .move-name { display: block; font-weight: 600; color: var(--pbi-text); line-height: 1.35; }
-    .move-detail { display: block; font-size: 11px; color: var(--pbi-muted); margin-top: 2px; }
+    .move-name { display: block; font-weight: 600; color: var(--text); line-height: 1.35; }
+    .move-detail { display: block; font-size: 10px; color: var(--muted); margin-top: 2px; }
     .movements-empty {
-      padding: 24px 20px;
+      padding: 20px 18px;
       text-align: center;
-      color: var(--pbi-muted);
-      font-size: 13px;
+      color: var(--muted);
+      font-size: 12px;
     }
     #chart {
       height: 440px;
       position: relative;
       width: calc(100% - 24px);
-      margin: 0 12px 14px;
-      border-radius: 2px;
+      margin: 0 12px 12px;
       overflow: hidden;
-      border: 1px solid var(--pbi-border);
-      background: #fff;
+      border: 1px solid var(--border);
+      background: var(--bg);
     }
     footer.muted {
-      margin-top: 20px;
-      padding-top: 16px;
-      border-top: 1px solid var(--pbi-border);
-      font-size: 12px;
-      color: var(--pbi-muted);
+      margin-top: 16px;
+      padding-top: 14px;
+      border-top: 1px solid var(--border);
+      font-size: 11px;
+      color: var(--muted);
       line-height: 1.55;
     }
-    footer.muted a { color: var(--pbi-accent); text-decoration: none; }
-    footer.muted a:hover { color: var(--pbi-accent-hover); text-decoration: underline; }
-    code { font-size: 0.92em; background: #f3f2f1; padding: 2px 6px; border-radius: 2px; border: 1px solid var(--pbi-border); }
+    footer.muted a { color: var(--accent-dim); text-decoration: none; }
+    footer.muted a:hover { color: var(--accent); text-decoration: underline; }
+    code {
+      font-size: 0.95em;
+      background: var(--bg);
+      padding: 1px 5px;
+      border: 1px solid var(--border);
+    }
     .calc-hint {
-      margin: 0 0 12px;
-      padding: 0 20px;
-      font-size: 12px;
-      color: var(--pbi-muted);
+      margin: 0 0 10px;
+      padding: 0 18px;
+      font-size: 11px;
+      color: var(--muted);
       line-height: 1.45;
     }
-    .calc-table-wrap { overflow-x: auto; padding: 0 20px; }
-    .calc-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+    .calc-table-wrap { overflow-x: auto; padding: 0 18px; }
+    .calc-table { width: 100%; border-collapse: collapse; font-size: 12px; }
     .calc-table th {
       text-align: left;
-      padding: 8px 10px;
-      border-bottom: 1px solid var(--pbi-border);
-      color: var(--pbi-muted);
-      font-size: 11px;
+      padding: 6px 8px;
+      border-bottom: 1px solid var(--border);
+      color: var(--muted);
+      font-size: 10px;
       font-weight: 600;
       text-transform: uppercase;
-      letter-spacing: 0.05em;
+      letter-spacing: 0.06em;
     }
-    .calc-table td { padding: 8px 10px; border-bottom: 1px solid #f3f2f1; vertical-align: middle; }
+    .calc-table td {
+      padding: 6px 8px;
+      border-bottom: 1px solid var(--border-subtle);
+      vertical-align: middle;
+    }
     .calc-table select {
-      min-width: 180px;
-      max-width: min(420px, 100%);
+      min-width: 160px;
+      max-width: min(400px, 100%);
       width: 100%;
-      height: 32px;
-      padding: 0 10px;
-      border: 1px solid #8a8886;
-      border-radius: 2px;
-      font-size: 13px;
+      height: 30px;
+      padding: 0 8px;
+      border: 1px solid var(--border);
+      font-size: 12px;
       font-family: inherit;
-      background: var(--pbi-card);
+      background: var(--bg);
+      color: var(--text);
     }
     .calc-table input[type="number"] {
-      width: 110px;
-      height: 32px;
+      width: 96px;
+      height: 30px;
       padding: 0 8px;
-      border: 1px solid #8a8886;
-      border-radius: 2px;
-      font-size: 14px;
-      font-family: inherit;
-    }
-    .calc-unit { color: var(--pbi-text); font-weight: 600; white-space: nowrap; }
-    .calc-remove {
-      background: var(--pbi-card);
-      border: 1px solid var(--pbi-border);
-      border-radius: 2px;
-      padding: 5px 12px;
-      cursor: pointer;
+      border: 1px solid var(--border);
       font-size: 12px;
-      color: var(--pbi-text);
+      font-family: inherit;
+      background: var(--bg);
+      color: var(--text);
     }
-    .calc-remove:hover { background: #f3f2f1; }
+    .calc-unit { color: var(--text); font-weight: 600; white-space: nowrap; }
+    .calc-price {
+      color: var(--text);
+      font-variant-numeric: tabular-nums;
+      white-space: nowrap;
+    }
+    .calc-remove {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      padding: 4px 10px;
+      cursor: pointer;
+      font-size: 11px;
+      color: var(--muted);
+      font-family: inherit;
+      text-transform: lowercase;
+    }
+    .calc-remove:hover { color: var(--text); border-color: var(--muted); }
     .calc-add-btn {
-      margin: 4px 20px 16px;
-      height: 32px;
-      padding: 0 16px;
-      border-radius: 2px;
-      border: 1px solid var(--pbi-accent);
-      background: var(--pbi-card);
-      color: var(--pbi-accent);
+      margin: 2px 18px 14px;
+      height: 30px;
+      padding: 0 14px;
+      border: 1px solid var(--accent);
+      background: var(--bg);
+      color: var(--accent);
       font-weight: 600;
-      font-size: 13px;
+      font-size: 11px;
       cursor: pointer;
       font-family: inherit;
+      text-transform: lowercase;
+      letter-spacing: 0.04em;
     }
-    .calc-add-btn:hover { background: #f3f9fd; }
+    .calc-add-btn:hover { background: var(--surface-elev); }
     .calc-totals {
-      margin: 8px 20px 18px;
-      padding: 14px 16px;
-      background: #faf9f8;
-      border: 1px solid var(--pbi-border);
-      border-radius: 2px;
+      margin: 6px 18px 14px;
+      padding: 12px 14px;
+      background: var(--bg);
+      border: 1px solid var(--border);
       display: grid;
-      grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
-      gap: 14px;
+      grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+      gap: 12px;
     }
     .calc-total-block .calc-total-label {
-      font-size: 11px;
+      font-size: 10px;
       text-transform: uppercase;
-      letter-spacing: 0.05em;
-      color: var(--pbi-muted);
+      letter-spacing: 0.06em;
+      color: var(--muted);
     }
     .calc-total-block .calc-total-val {
-      font-size: 20px;
+      font-size: 16px;
       font-weight: 600;
-      color: var(--pbi-text);
-      margin-top: 4px;
+      color: var(--text);
+      margin-top: 2px;
+      font-variant-numeric: tabular-nums;
     }
+    .empty-state {
+      padding: 28px 18px;
+      text-align: center;
+      font-size: 12px;
+      color: var(--muted);
+      border-bottom: 1px solid var(--border-subtle);
+    }
+"""
+
+
+DASHBOARD_HTML = (
+    """<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1"/>
+  <title>Kalimati · dashboard</title>
+  <script src="https://cdn.jsdelivr.net/npm/lightweight-charts@4.2.0/dist/lightweight-charts.standalone.production.js"></script>
+  <style>
+"""
+    + SHARED_CSS
+    + """
   </style>
 </head>
 <body>
   <header class="app-header">
     <div class="app-header-inner">
-      <div class="brand">
-        <span class="brand-mark" aria-hidden="true"></span>
-        <div>
-          <h1>Kalimati market prices</h1>
-          <p class="brand-sub">Candlestick series (min–max wicks, prior vs current average in the body). Pick a commodity and range.</p>
+      <div class="header-row">
+        <div class="brand">
+          <span class="brand-mark" aria-hidden="true"></span>
+          <div>
+            <h1>Kalimati market prices</h1>
+            <p class="brand-sub">Candlestick (min–max wicks, day-over-day average in the body). Scope a commodity and window.</p>
+          </div>
         </div>
+        <nav class="site-nav" aria-label="Sections">
+          <a href="/" class="site-nav-link active">dashboard</a>
+          <a href="/calculator" class="site-nav-link">calculator</a>
+        </nav>
       </div>
       <div class="filters">
         <div class="field">
@@ -438,45 +502,6 @@ PAGE = """
             <div class="kpi-label">Vs prior snapshot</div>
             <div class="kpi-value" id="kpi-delta">—</div>
             <div class="kpi-foot" id="kpi-delta-note">Change in average price</div>
-          </div>
-        </div>
-      </section>
-
-      <section class="card" id="calc-card" hidden>
-        <div class="card-title-row">
-          <strong>Today's price calculator</strong>
-          <span id="calc-day">—</span>
-        </div>
-        <p class="calc-hint">
-          Add lines, enter quantity in each item's unit (e.g. केजी). Totals multiply quantity by wholesale
-          <strong>min</strong>, <strong>avg</strong>, or <strong>max</strong> from the latest day in your database.
-        </p>
-        <div class="calc-table-wrap">
-          <table class="calc-table" aria-label="Basket calculator">
-            <thead>
-              <tr>
-                <th>Item</th>
-                <th>Quantity</th>
-                <th>Unit</th>
-                <th></th>
-              </tr>
-            </thead>
-            <tbody id="calc-tbody"></tbody>
-          </table>
-        </div>
-        <button type="button" class="calc-add-btn" id="calc-add">Add item</button>
-        <div class="calc-totals">
-          <div class="calc-total-block">
-            <div class="calc-total-label">Total (min rates)</div>
-            <div class="calc-total-val" id="calc-total-min">—</div>
-          </div>
-          <div class="calc-total-block">
-            <div class="calc-total-label">Total (average rates)</div>
-            <div class="calc-total-val" id="calc-total-avg">—</div>
-          </div>
-          <div class="calc-total-block">
-            <div class="calc-total-label">Total (max rates)</div>
-            <div class="calc-total-val" id="calc-total-max">—</div>
           </div>
         </div>
       </section>
@@ -565,11 +590,6 @@ PAGE = """
       noteEl.textContent = 'Compared to prior day with data in this window';
     }
 
-    /**
-     * Real OHLC uses open/close = day-over-day average move; when averages barely change,
-     * the body collapses to a hairline while wicks still show min–max (looks like a thin T).
-     * Expand the body slightly (within the same low–high) so candles stay readable.
-     */
     function ensureVisibleCandleBody(open, close, high, low) {
       let o = open, c = close, h = high, l = low;
       const range = h - l;
@@ -693,29 +713,29 @@ PAGE = """
         width: w,
         height: h,
         layout: {
-          background: { type: L.ColorType.Solid, color: '#ffffff' },
-          textColor: '#605e5c',
-          fontSize: 12,
-          fontFamily: '"Segoe UI", "Segoe UI Web (West European)", system-ui, sans-serif',
+          background: { type: L.ColorType.Solid, color: '#0a0a0a' },
+          textColor: '#737373',
+          fontSize: 11,
+          fontFamily: 'ui-monospace, Menlo, Consolas, monospace',
         },
         localization: {
           priceFormatter: (price) => 'NPR ' + fmtNpr(price),
         },
         grid: {
-          vertLines: { color: '#edebe9' },
-          horzLines: { color: '#edebe9' },
+          vertLines: { color: '#1a1a1a' },
+          horzLines: { color: '#1a1a1a' },
         },
         crosshair: {
           mode: L.CrosshairMode.Normal,
-          vertLine: { color: '#c8c6c4', labelBackgroundColor: '#0078d4' },
-          horzLine: { color: '#c8c6c4', labelBackgroundColor: '#0078d4' },
+          vertLine: { color: '#404040', labelBackgroundColor: '#1f1f1f' },
+          horzLine: { color: '#404040', labelBackgroundColor: '#1f1f1f' },
         },
         rightPriceScale: {
-          borderColor: '#edebe9',
+          borderColor: '#2a2a2a',
           scaleMargins: { top: 0.06, bottom: 0.1 },
         },
         timeScale: {
-          borderColor: '#edebe9',
+          borderColor: '#2a2a2a',
           timeVisible: false,
           secondsVisible: false,
           fixLeftEdge: false,
@@ -724,13 +744,13 @@ PAGE = """
       });
 
       const series = tvChart.addCandlestickSeries({
-        upColor: '#1b7f3b',
-        downColor: '#c0352b',
+        upColor: '#4ade80',
+        downColor: '#f87171',
         borderVisible: true,
-        borderUpColor: '#146b32',
-        borderDownColor: '#a82d24',
-        wickUpColor: '#1b7f3b',
-        wickDownColor: '#c0352b',
+        borderUpColor: '#22c55e',
+        borderDownColor: '#ef4444',
+        wickUpColor: '#4ade80',
+        wickDownColor: '#f87171',
         wickVisible: true,
         priceLineVisible: false,
       });
@@ -849,6 +869,107 @@ PAGE = """
       }
     }
 
+    loadCommodities();
+    loadMovements();
+  </script>
+</body>
+</html>
+"""
+)
+
+
+CALCULATOR_HTML = (
+    """<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1"/>
+  <title>Kalimati · basket calculator</title>
+  <style>
+"""
+    + SHARED_CSS
+    + """
+  </style>
+</head>
+<body>
+  <header class="app-header">
+    <div class="app-header-inner">
+      <div class="header-row">
+        <div class="brand">
+          <span class="brand-mark" aria-hidden="true"></span>
+          <div>
+            <h1>Basket calculator</h1>
+            <p class="brand-sub">Latest snapshot wholesale rates. Quantity is in each line's unit (e.g. केजी). Line total uses min / avg / max for that item.</p>
+          </div>
+        </div>
+        <nav class="site-nav" aria-label="Sections">
+          <a href="/" class="site-nav-link">dashboard</a>
+          <a href="/calculator" class="site-nav-link active">calculator</a>
+        </nav>
+      </div>
+    </div>
+  </header>
+
+  <main class="app-main">
+    <div class="content-grid">
+      <section class="card" id="calc-card">
+        <div id="calc-empty" class="empty-state" hidden>
+          No snapshot in SQLite. Run <code>scripts/daily_job.py</code> to ingest prices.
+        </div>
+        <div id="calc-body" hidden>
+          <div class="card-title-row">
+            <strong>Basket lines</strong>
+            <span id="calc-day">—</span>
+          </div>
+          <p class="calc-hint">
+            Each row shows wholesale <strong>avg</strong> per unit for the selected item (same day as totals).
+            Totals multiply quantity by snapshot <strong>min</strong>, <strong>avg</strong>, or <strong>max</strong>.
+          </p>
+          <div class="calc-table-wrap">
+            <table class="calc-table" aria-label="Basket calculator">
+              <thead>
+                <tr>
+                  <th>Item</th>
+                  <th>Qty</th>
+                  <th>Unit</th>
+                  <th>Avg / unit</th>
+                  <th></th>
+                </tr>
+              </thead>
+              <tbody id="calc-tbody"></tbody>
+            </table>
+          </div>
+          <button type="button" class="calc-add-btn" id="calc-add">Add item</button>
+          <div class="calc-totals">
+            <div class="calc-total-block">
+              <div class="calc-total-label">Total (min)</div>
+              <div class="calc-total-val" id="calc-total-min">—</div>
+            </div>
+            <div class="calc-total-block">
+              <div class="calc-total-label">Total (avg)</div>
+              <div class="calc-total-val" id="calc-total-avg">—</div>
+            </div>
+            <div class="calc-total-block">
+              <div class="calc-total-label">Total (max)</div>
+              <div class="calc-total-val" id="calc-total-max">—</div>
+            </div>
+          </div>
+        </div>
+      </section>
+    </div>
+
+    <footer class="muted">
+      Data source: local SQLite (<code>data/prices.db</code>). Refresh with <code>scripts/daily_job.py</code>.
+      Website: <a href="https://kalimatimarket.gov.np/" target="_blank" rel="noreferrer">kalimatimarket.gov.np</a>
+    </footer>
+  </main>
+
+  <script>
+    function fmtNpr(n) {
+      if (n == null || Number.isNaN(n)) return '—';
+      return new Intl.NumberFormat('en-NP', { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(n);
+    }
+
     let priceCatalog = [];
     let priceMap = {};
     let calcLines = [{ id: 1, commodity: '', qty: 1 }];
@@ -895,7 +1016,7 @@ PAGE = """
         const sel = document.createElement('select');
         const opt0 = document.createElement('option');
         opt0.value = '';
-        opt0.textContent = '— Select item —';
+        opt0.textContent = '— select —';
         sel.appendChild(opt0);
         for (const it of priceCatalog) {
           const o = document.createElement('option');
@@ -930,10 +1051,18 @@ PAGE = """
         td3.className = 'calc-unit';
 
         const td4 = document.createElement('td');
+        td4.className = 'calc-price';
+        if (pr && pr.avg_price != null && !Number.isNaN(Number(pr.avg_price))) {
+          td4.textContent = 'NPR ' + fmtNpr(pr.avg_price);
+        } else {
+          td4.textContent = '—';
+        }
+
+        const td5 = document.createElement('td');
         const btn = document.createElement('button');
         btn.type = 'button';
         btn.className = 'calc-remove';
-        btn.textContent = 'Remove';
+        btn.textContent = 'remove';
         btn.addEventListener('click', () => {
           if (calcLines.length <= 1) {
             line.commodity = '';
@@ -946,26 +1075,30 @@ PAGE = """
           renderCalcRows();
           recalcTotals();
         });
-        td4.appendChild(btn);
+        td5.appendChild(btn);
 
         tr.appendChild(td1);
         tr.appendChild(td2);
         tr.appendChild(td3);
         tr.appendChild(td4);
+        tr.appendChild(td5);
         tb.appendChild(tr);
       }
     }
 
     async function loadTodayPrices() {
-      const card = document.getElementById('calc-card');
+      const emptyEl = document.getElementById('calc-empty');
+      const bodyEl = document.getElementById('calc-body');
       try {
         const res = await fetch('/api/today-prices');
         const data = await res.json();
         if (!data.has_data) {
-          card.hidden = true;
+          emptyEl.hidden = false;
+          bodyEl.hidden = true;
           return;
         }
-        card.hidden = false;
+        emptyEl.hidden = true;
+        bodyEl.hidden = false;
         document.getElementById('calc-day').textContent = data.day;
         priceCatalog = data.items || [];
         priceMap = {};
@@ -978,7 +1111,8 @@ PAGE = """
         renderCalcRows();
         recalcTotals();
       } catch (e) {
-        card.hidden = true;
+        emptyEl.hidden = false;
+        bodyEl.hidden = true;
       }
     }
 
@@ -988,13 +1122,12 @@ PAGE = """
       recalcTotals();
     });
 
-    loadCommodities();
-    loadMovements();
     loadTodayPrices();
   </script>
 </body>
 </html>
 """
+)
 
 
 def create_app(db_path: Path | None = None) -> Flask:
@@ -1003,7 +1136,11 @@ def create_app(db_path: Path | None = None) -> Flask:
 
     @app.get("/")
     def index() -> str:
-        return render_template_string(PAGE)
+        return render_template_string(DASHBOARD_HTML)
+
+    @app.get("/calculator")
+    def calculator() -> str:
+        return render_template_string(CALCULATOR_HTML)
 
     @app.get("/api/commodities")
     def commodities() -> Response:
@@ -1040,4 +1177,5 @@ def create_app(db_path: Path | None = None) -> Flask:
 
 def run(host: str | None = None, port: int | None = None, db_path: Path | None = None) -> None:
     app = create_app(db_path)
-    app.run(host=host or DASHBOARD_HOST, port=port or DASHBOARD_PORT, debug=False)
+    app.run(host=host or DASHBOARD_HOST,
+            port=port or DASHBOARD_PORT, debug=False)
