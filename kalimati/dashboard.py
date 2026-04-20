@@ -71,7 +71,7 @@ PAGE = """
   <meta charset="utf-8"/>
   <meta name="viewport" content="width=device-width, initial-scale=1"/>
   <title>Kalimati prices</title>
-  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/lightweight-charts@4.2.0/dist/lightweight-charts.standalone.production.js"></script>
   <style>
     :root {
       --bg: #eceef2;
@@ -158,7 +158,13 @@ PAGE = """
       gap: 8px; padding: 0 6px 12px;
     }
     .chart-head span { font-size: 0.875rem; color: var(--muted); }
-    canvas { width: 100% !important; height: 380px !important; }
+    #chart {
+      width: 100%;
+      height: 420px;
+      position: relative;
+      border-radius: 10px;
+      overflow: hidden;
+    }
     footer.muted {
       margin-top: 18px; font-size: 0.8125rem; color: var(--muted); line-height: 1.5;
     }
@@ -172,7 +178,7 @@ PAGE = """
     <div class="title-row">
       <div>
         <h1>Kalimati market prices</h1>
-        <p class="subtitle">Daily min, average, and max from your SQLite snapshot. Adjust commodity and time window below.</p>
+        <p class="subtitle">Candlesticks (TradingView Lightweight Charts): wicks = min–max range; body = prior day’s average → today’s average (green when the average drops). Change commodity and window below.</p>
       </div>
       <div class="filters">
         <div class="field">
@@ -209,7 +215,7 @@ PAGE = """
         <strong id="chart-title">Price trend</strong>
         <span id="chart-range"></span>
       </div>
-      <canvas id="chart" aria-label="Price trend chart"></canvas>
+      <div id="chart" role="img" aria-label="Price candlestick chart"></div>
     </div>
 
     <footer class="muted">
@@ -219,7 +225,8 @@ PAGE = """
   </div>
 
   <script>
-    let chart;
+    let tvChart = null;
+    let chartResizeObs = null;
 
     function fmtNpr(n) {
       if (n == null || Number.isNaN(n)) return '—';
@@ -264,61 +271,185 @@ PAGE = """
       noteEl.textContent = 'Compared to prior day with data in this window';
     }
 
-    function renderChart(payload) {
-      const labels = payload.points.map(p => p.day);
-      const mins = payload.points.map(p => p.min_price);
-      const maxs = payload.points.map(p => p.max_price);
-      const avgs = payload.points.map(p => p.avg_price);
+    /**
+     * Real OHLC uses open/close = day-over-day average move; when averages barely change,
+     * the body collapses to a hairline while wicks still show min–max (looks like a thin T).
+     * Expand the body slightly (within the same low–high) so candles stay readable.
+     */
+    function ensureVisibleCandleBody(open, close, high, low) {
+      let o = open, c = close, h = high, l = low;
+      const range = h - l;
+      const body = Math.abs(c - o);
+      if (!isFinite(range) || range < 0) return { open: o, close: c, high: h, low: l };
 
-      document.getElementById('chart-title').textContent = payload.commodity || 'Price trend';
-      const r = payload.period === 'all' ? 'Full history' : 'Last ' + payload.period + ' days';
-      document.getElementById('chart-range').textContent = r + ' · ' + payload.points.length + ' points';
+      if (range === 0) {
+        const pad = 0.5;
+        const m = h;
+        return {
+          open: m - pad * 0.35,
+          close: m + pad * 0.35,
+          high: m + pad,
+          low: m - pad,
+        };
+      }
 
-      const cfg = {
-        type: 'line',
-        data: {
-          labels,
-          datasets: [
-            { label: 'Min', data: mins, borderColor: '#13a876', backgroundColor: 'transparent', tension: 0.2, borderWidth: 2, pointRadius: 0, spanGaps: true },
-            { label: 'Average', data: avgs, borderColor: '#1f6feb', backgroundColor: 'rgba(31,111,235,0.06)', fill: false, tension: 0.2, borderWidth: 2.2, pointRadius: 0, spanGaps: true },
-            { label: 'Max', data: maxs, borderColor: '#d9480f', tension: 0.2, borderWidth: 2, pointRadius: 0, spanGaps: true },
-          ]
-        },
-        options: {
-          responsive: true,
-          interaction: { mode: 'index', intersect: false },
-          plugins: {
-            legend: {
-              position: 'top',
-              align: 'end',
-              labels: { boxWidth: 12, font: { size: 12 }, color: '#5c6370' }
-            },
-            tooltip: {
-              callbacks: {
-                label(ctx) {
-                  let v = ctx.parsed.y;
-                  if (v == null) return ctx.dataset.label + ': —';
-                  return ctx.dataset.label + ': NPR ' + fmtNpr(v);
-                }
-              }
-            }
-          },
-          scales: {
-            x: {
-              ticks: { color: '#5c6370', maxRotation: 0, autoSkip: true, maxTicksLimit: 12 },
-              grid: { display: false }
-            },
-            y: {
-              ticks: { color: '#5c6370', callback: (v) => fmtNpr(v) },
-              grid: { color: '#e8eaef' },
-              border: { display: false }
-            }
-          }
+      const minBody = Math.max(range * 0.07, 0.4);
+      if (body >= minBody) return { open: o, close: c, high: h, low: l };
+
+      const bearish = c < o;
+      const mid = (o + c) / 2;
+      let half = Math.min(minBody / 2, range / 2 - 1e-6);
+      if (half <= 0) {
+        o = l;
+        c = h;
+        if (bearish) { o = h; c = l; }
+        return { open: o, close: c, high: h, low: l };
+      }
+      if (!bearish) {
+        o = mid - half;
+        c = mid + half;
+      } else {
+        o = mid + half;
+        c = mid - half;
+      }
+      let loB = Math.min(o, c);
+      let hiB = Math.max(o, c);
+      if (loB < l) {
+        const d = l - loB;
+        o += d;
+        c += d;
+      }
+      loB = Math.min(o, c);
+      hiB = Math.max(o, c);
+      if (hiB > h) {
+        const d = hiB - h;
+        o -= d;
+        c -= d;
+      }
+      return { open: o, close: c, high: h, low: l };
+    }
+
+    function buildCandleData(points) {
+      const rows = [];
+      for (let i = 0; i < points.length; i++) {
+        const p = points[i];
+        const prev = i > 0 ? points[i - 1] : null;
+        const minV = p.min_price;
+        const maxV = p.max_price;
+        const avgV = p.avg_price;
+        let c = avgV;
+        if (c == null || Number.isNaN(c)) {
+          if (minV != null && maxV != null) c = (minV + maxV) / 2;
+          else c = minV ?? maxV;
         }
-      };
+        if (c == null || Number.isNaN(c)) continue;
+        let o;
+        if (prev) {
+          o = prev.avg_price;
+          if (o == null || Number.isNaN(o)) {
+            const pm = prev.min_price, px = prev.max_price;
+            if (pm != null && px != null) o = (pm + px) / 2;
+            else o = pm ?? px ?? c;
+          }
+        } else {
+          o = c;
+        }
+        let h = maxV != null ? maxV : Math.max(o, c);
+        let l = minV != null ? minV : Math.min(o, c);
+        if (l > h) { const t = l; l = h; h = t; }
+        const adj = ensureVisibleCandleBody(o, c, h, l);
+        rows.push({
+          time: String(p.day).slice(0, 10),
+          open: adj.open,
+          high: adj.high,
+          low: adj.low,
+          close: adj.close,
+        });
+      }
+      return rows;
+    }
 
-      if (chart) chart.destroy();
-      chart = new Chart(document.getElementById('chart'), cfg);
+    function renderChart(payload) {
+      const el = document.getElementById('chart');
+      const L = window.LightweightCharts;
+      if (!L) {
+        console.error('LightweightCharts failed to load');
+        return;
+      }
+
+      if (tvChart) {
+        tvChart.remove();
+        tvChart = null;
+      }
+      if (chartResizeObs) {
+        chartResizeObs.disconnect();
+        chartResizeObs = null;
+      }
+
+      const candleData = buildCandleData(payload.points);
+      const h = 420;
+
+      document.getElementById('chart-title').textContent = (payload.commodity || 'Price') + ' · candlestick';
+      const r = payload.period === 'all' ? 'Full history' : 'Last ' + payload.period + ' days';
+      document.getElementById('chart-range').textContent = r + ' · ' + candleData.length + ' day(s)';
+
+      const w = Math.max(200, Math.floor(el.clientWidth || el.parentElement.clientWidth || 600));
+
+      tvChart = L.createChart(el, {
+        width: w,
+        height: h,
+        layout: {
+          background: { type: L.ColorType.Solid, color: '#ffffff' },
+          textColor: '#5c6370',
+          fontSize: 12,
+          fontFamily: '"Segoe UI", system-ui, -apple-system, sans-serif',
+        },
+        localization: {
+          priceFormatter: (price) => 'NPR ' + fmtNpr(price),
+        },
+        grid: {
+          vertLines: { color: '#eceef2' },
+          horzLines: { color: '#eceef2' },
+        },
+        crosshair: {
+          mode: L.CrosshairMode.Normal,
+          vertLine: { color: '#c5cad6', labelBackgroundColor: '#1f6feb' },
+          horzLine: { color: '#c5cad6', labelBackgroundColor: '#1f6feb' },
+        },
+        rightPriceScale: {
+          borderColor: '#d4d8e0',
+          scaleMargins: { top: 0.06, bottom: 0.1 },
+        },
+        timeScale: {
+          borderColor: '#d4d8e0',
+          timeVisible: false,
+          secondsVisible: false,
+          fixLeftEdge: false,
+          fixRightEdge: false,
+        },
+      });
+
+      const series = tvChart.addCandlestickSeries({
+        upColor: '#1b7f3b',
+        downColor: '#c0352b',
+        borderVisible: true,
+        borderUpColor: '#146b32',
+        borderDownColor: '#a82d24',
+        wickUpColor: '#1b7f3b',
+        wickDownColor: '#c0352b',
+        wickVisible: true,
+        priceLineVisible: false,
+      });
+      series.setData(candleData);
+      tvChart.timeScale().fitContent();
+
+      chartResizeObs = new ResizeObserver(() => {
+        if (!tvChart) return;
+        const nw = Math.max(200, Math.floor(el.clientWidth));
+        tvChart.resize(nw, h);
+      });
+      chartResizeObs.observe(el);
+
       renderKpis(payload.kpis);
     }
 
