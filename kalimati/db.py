@@ -5,9 +5,12 @@ from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import date
 from pathlib import Path
-from typing import Iterable, Iterator
+from typing import Any, Iterable, Iterator
 
 from kalimati.config import DB_PATH
+
+# Same basis as posters / dashboard: min wholesale vs prior day.
+MIN_PRICE_MOVE_EPS = 0.01
 
 
 SCHEMA = """
@@ -126,6 +129,70 @@ def series_for_commodity(commodity: str, path: Path | None = None) -> list[dict]
             (commodity,),
         )
         return [dict(row) for row in cur.fetchall()]
+
+
+def snapshot_min_price_movements(path: Path | None = None) -> dict[str, Any]:
+    """
+    Classify commodities on the latest day vs the prior snapshot using minimum price.
+
+    Returns ``has_data``, ``latest_day``, ``prior_day``, and three lists:
+    ``down``, ``up``, ``neutral``. Each item has ``commodity``, ``min``, ``prior_min`` (nullable),
+    and ``delta`` (nullable when not comparable).
+    """
+    latest, prior = latest_two_days(path)
+    if latest is None:
+        return {"has_data": False}
+
+    cur = prices_for_day(latest, path)
+    prev_map = prices_for_day(prior, path) if prior else {}
+
+    down: list[dict[str, Any]] = []
+    up: list[dict[str, Any]] = []
+    neutral: list[dict[str, Any]] = []
+
+    for name in sorted(cur.keys(), key=str.casefold):
+        row = cur[name]
+        cm = row.min_price
+        pr = prev_map.get(name)
+        pm = pr.min_price if pr else None
+        if cm is None:
+            neutral.append(
+                {
+                    "commodity": name,
+                    "min": None,
+                    "prior_min": float(pm) if pm is not None else None,
+                    "delta": None,
+                }
+            )
+            continue
+        if pm is None:
+            neutral.append(
+                {
+                    "commodity": name,
+                    "min": float(cm),
+                    "prior_min": None,
+                    "delta": None,
+                }
+            )
+            continue
+        a, b = float(pm), float(cm)
+        d = b - a
+        item = {"commodity": name, "min": b, "prior_min": a, "delta": d}
+        if d < -MIN_PRICE_MOVE_EPS:
+            down.append(item)
+        elif d > MIN_PRICE_MOVE_EPS:
+            up.append(item)
+        else:
+            neutral.append(item)
+
+    return {
+        "has_data": True,
+        "latest_day": latest.isoformat(),
+        "prior_day": prior.isoformat() if prior else None,
+        "down": down,
+        "up": up,
+        "neutral": neutral,
+    }
 
 
 def digest_stats(path: Path | None = None) -> dict:

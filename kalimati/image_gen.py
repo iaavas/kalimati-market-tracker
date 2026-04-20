@@ -9,7 +9,7 @@ from dataclasses import dataclass
 from datetime import date
 from io import BytesIO
 from pathlib import Path
-from typing import Iterable
+from typing import Iterable, Literal
 
 import requests
 from PIL import Image, ImageDraw, ImageFont, ImageFilter, ImageOps
@@ -42,6 +42,25 @@ TEXT_BODY = (58, 46, 34)
 TEXT_MUTED = (120, 106, 90)
 PHOTO_RING = (176, 140, 89)
 PHOTO_HALO = (255, 248, 235)
+
+# Min wholesale price change vs prior snapshot (same basis as notifications).
+_PRICE_MOVE_EPS = 0.01
+
+PriceMove = Literal["down", "up", "neutral"]
+
+
+def _min_price_movement(current: PriceRow, previous: PriceRow | None) -> PriceMove:
+    if previous is None:
+        return "neutral"
+    cm = current.min_price
+    pm = previous.min_price
+    if cm is None or pm is None:
+        return "neutral"
+    if cm < pm - _PRICE_MOVE_EPS:
+        return "down"
+    if cm > pm + _PRICE_MOVE_EPS:
+        return "up"
+    return "neutral"
 
 
 def _to_devanagari_numerals(s: str) -> str:
@@ -253,7 +272,7 @@ def _wiki_thumbnail_url(session: requests.Session, search_term: str) -> str | No
                 "titles": page_title,
                 "prop": "pageimages",
                 "format": "json",
-                "pithumbsize": 640,
+                "pithumbsize": 1280,
             },
             timeout=20,
         )
@@ -275,7 +294,7 @@ def _load_or_fetch_thumb(
     search_term: str,
 ) -> Image.Image:
     cache_dir.mkdir(parents=True, exist_ok=True)
-    path = cache_dir / f"{_slug(commodity)}.jpg"
+    path = cache_dir / f"{_slug(commodity)}_hq.jpg"
     if path.exists():
         try:
             return Image.open(path).convert("RGB")
@@ -289,14 +308,14 @@ def _load_or_fetch_thumb(
             resp = session.get(url, timeout=25)
             resp.raise_for_status()
             im = Image.open(BytesIO(resp.content)).convert("RGB")
-            im.save(path, format="JPEG", quality=88, optimize=True)
+            im.save(path, format="JPEG", quality=93, optimize=True)
             return im
         except (requests.RequestException, OSError):
             pass
 
-    ph = Image.new("RGB", (256, 256), PHOTO_HALO)
+    ph = Image.new("RGB", (512, 512), PHOTO_HALO)
     d = ImageDraw.Draw(ph)
-    d.text((100, 108), "?", fill=PHOTO_RING, font=_font_sans(72, bold=True))
+    d.text((196, 216), "?", fill=PHOTO_RING, font=_font_sans(144, bold=True))
     return ph
 
 
@@ -320,18 +339,32 @@ def _parchment_canvas(width: int, height: int) -> Image.Image:
     return arr
 
 
-def _draw_frame(draw: ImageDraw.ImageDraw, rect: tuple[int, int, int, int]) -> None:
+def _draw_frame(
+    draw: ImageDraw.ImageDraw,
+    rect: tuple[int, int, int, int],
+    *,
+    line_scale: float = 1.0,
+) -> None:
     x0, y0, x1, y1 = rect
-    draw.rectangle(rect, outline=FRAME_OUTER, width=4)
-    draw.rectangle((x0 + 10, y0 + 10, x1 - 10, y1 - 10), outline=_FRAME_INNER, width=2)
-    s = 22
+    ow = max(3, int(round(4 * line_scale)))
+    iw = max(2, int(round(2 * line_scale)))
+    inset = max(8, int(round(10 * line_scale)))
+    corner = max(4, int(round(6 * line_scale)))
+    s = max(16, int(round(22 * line_scale)))
+    w_arc = max(2, int(round(3 * line_scale)))
+    draw.rectangle(rect, outline=FRAME_OUTER, width=ow)
+    draw.rectangle(
+        (x0 + inset, y0 + inset, x1 - inset, y1 - inset),
+        outline=_FRAME_INNER,
+        width=iw,
+    )
     for cx, cy, a0, a1 in (
-        (x0 + 6, y0 + 6, 0, 90),
-        (x1 - 6, y0 + 6, 90, 180),
-        (x1 - 6, y1 - 6, 180, 270),
-        (x0 + 6, y1 - 6, 270, 360),
+        (x0 + corner, y0 + corner, 0, 90),
+        (x1 - corner, y0 + corner, 90, 180),
+        (x1 - corner, y1 - corner, 180, 270),
+        (x0 + corner, y1 - corner, 270, 360),
     ):
-        draw.arc((cx - s, cy - s, cx + s, cy + s), a0, a1, fill=PHOTO_RING, width=3)
+        draw.arc((cx - s, cy - s, cx + s, cy + s), a0, a1, fill=PHOTO_RING, width=w_arc)
 
 
 def _circle_photo_rgba(im: Image.Image, diameter: int) -> Image.Image:
@@ -344,21 +377,64 @@ def _circle_photo_rgba(im: Image.Image, diameter: int) -> Image.Image:
     out.paste(halo, (0, 0))
     out.paste(im, (0, 0), mask)
     ring = ImageDraw.Draw(out)
-    ring.ellipse((2, 2, diameter - 3, diameter - 3), outline=PHOTO_RING, width=4)
+    rw = max(2, min(8, diameter // 30))
+    ring.ellipse((2, 2, diameter - 3, diameter - 3), outline=PHOTO_RING, width=rw)
     return out
+
+
+@dataclass(frozen=True)
+class CellSentimentStyle:
+    fill: tuple[int, int, int]
+    border: tuple[int, int, int]
+    price: tuple[int, int, int]
+    name: tuple[int, int, int]
+    badge: tuple[int, int, int]
+    badge_text: str
+
+
+def _cell_style(move: PriceMove) -> CellSentimentStyle:
+    if move == "down":
+        return CellSentimentStyle(
+            fill=(228, 244, 232),
+            border=(34, 132, 76),
+            price=(18, 92, 52),
+            name=(42, 58, 46),
+            badge=(26, 118, 68),
+            badge_text="घट्यो",
+        )
+    if move == "up":
+        return CellSentimentStyle(
+            fill=(255, 232, 228),
+            border=(188, 72, 62),
+            price=(130, 42, 36),
+            name=(58, 44, 42),
+            badge=(168, 52, 44),
+            badge_text="बढ्यो",
+        )
+    return CellSentimentStyle(
+        fill=(238, 236, 230),
+        border=(130, 122, 110),
+        price=TEXT_TITLE,
+        name=TEXT_BODY,
+        badge=(105, 96, 84),
+        badge_text="जस्तै",
+    )
 
 
 @dataclass
 class PosterConfig:
-    width: int = 1080
+    """High-resolution poster (2× baseline) for sharper PNGs and social sharing."""
+
+    width: int = 2160
     cols: int = 6
     rows: int = 2
-    frame_margin: int = 26
-    content_pad: int = 40
-    title_h: int = 108
-    footer_h: int = 56
-    cell_photo: int = 118
-    gap_after_photo: int = 10
+    frame_margin: int = 52
+    content_pad: int = 80
+    header_h: int = 320
+    footer_h: int = 100
+    cell_photo: int = 236
+    gap_after_photo: int = 20
+    badge_h: int = 44
 
 
 def render_price_grid_png(
@@ -371,8 +447,9 @@ def render_price_grid_png(
     """
     Parchment-style poster: ``<out_root>/<YYYY-MM-DD>/page-NN.png``.
     6×2 grid (12 items), circular photos, Noto Sans Devanagari, ``रु.४५/केजी`` price lines.
+    Each cell is tinted by min-price movement vs the prior day: green (घट्यो), red (बढ्यो), neutral (जस्तै).
     """
-    _ = previous_by_commodity
+    prev_map = previous_by_commodity or {}
     cfg = PosterConfig()
     per_page = cfg.cols * cfg.rows
     root = out_root or OUTPUT_DIR
@@ -390,23 +467,25 @@ def render_price_grid_png(
         reg_path = Path("/System/Library/Fonts/Supplemental/Devanagari Sangam MN.ttc")
         bold_path = reg_path
 
-    font_title = _font_noto(bold_path, 44)
-    font_date = _font_noto(reg_path, 17)
-    font_name = _font_noto(bold_path, 22)
-    font_price = _font_noto(reg_path, 21)
-    font_foot = _font_noto(reg_path, 17)
+    sc = max(1, cfg.width // 1080)
+    font_title = _font_noto(bold_path, 44 * sc)
+    font_date = _font_noto(reg_path, 19 * sc)
+    font_name = _font_noto(bold_path, 22 * sc)
+    font_price = _font_noto(reg_path, 21 * sc)
+    font_badge = _font_noto(reg_path, 15 * sc)
+    font_foot = _font_noto(reg_path, 17 * sc)
 
     inner_w = cfg.width - 2 * (cfg.frame_margin + cfg.content_pad)
     cell_w = inner_w // cfg.cols
-    name_max_w = max(96, cell_w - 14)
-    # row height from photo + text
-    row_h = cfg.cell_photo + cfg.gap_after_photo + 56 + 36 + 8
+    line_scale = cfg.width / 1080.0
+    # row height: photo + name (2 lines) + price + badge
+    row_h = cfg.cell_photo + cfg.gap_after_photo + 120 * sc + 52 * sc + cfg.badge_h + 24
     height = (
         2 * cfg.frame_margin
-        + cfg.title_h
+        + cfg.header_h
         + cfg.rows * row_h
         + cfg.footer_h
-        + 24
+        + 32
     )
 
     paths: list[Path] = []
@@ -422,28 +501,28 @@ def render_price_grid_png(
             cfg.width - cfg.frame_margin,
             height - cfg.frame_margin,
         )
-        _draw_frame(draw, frame)
+        _draw_frame(draw, frame, line_scale=line_scale)
 
         cx0 = cfg.frame_margin + cfg.content_pad
-        cy0 = cfg.frame_margin + cfg.title_h // 2 + 8
-
-        title = "तरकारीको मूल्य सूची"
-        tw, th = _text_size(draw, title, font_title)
-        draw.text(((cfg.width - tw) // 2, cy0), title, fill=TEXT_TITLE, font=font_title)
+        y_top = cfg.frame_margin + 28 * sc
         date_txt = day.strftime("%Y-%m-%d")
         dw, dh = _text_size(draw, date_txt, font_date)
-        draw.text(((cfg.width - dw) // 2, cy0 + th + 6), date_txt, fill=TEXT_MUTED, font=font_date)
+        draw.text(((cfg.width - dw) // 2, y_top), date_txt, fill=TEXT_TITLE, font=font_date)
+        title = "तरकारीको मूल्य सूची"
+        tw, th = _text_size(draw, title, font_title)
+        draw.text(((cfg.width - tw) // 2, y_top + dh + 28 * sc), title, fill=TEXT_TITLE, font=font_title)
 
-        grid_top = cfg.frame_margin + cfg.title_h + 8
+        grid_top = cfg.frame_margin + cfg.header_h
         gx0 = cx0
-        inner_bottom = height - cfg.frame_margin - cfg.footer_h - 8
+        inner_bottom = height - cfg.frame_margin - cfg.footer_h - 16
 
         # light grid guides
+        gw = max(1, int(round(1 * line_scale)))
         for c in range(1, cfg.cols):
             x = gx0 + c * cell_w
-            draw.line((x, grid_top, x, inner_bottom), fill=(220, 208, 190), width=1)
+            draw.line((x, grid_top, x, inner_bottom), fill=(220, 208, 190), width=gw)
         mid_y = grid_top + row_h
-        draw.line((gx0, mid_y, gx0 + inner_w, mid_y), fill=(220, 208, 190), width=1)
+        draw.line((gx0, mid_y, gx0 + inner_w, mid_y), fill=(220, 208, 190), width=gw)
 
         slots = chunk + [None] * (per_page - len(chunk))
         for idx, row in enumerate(slots):
@@ -454,6 +533,23 @@ def render_price_grid_png(
             cx = cell_x0 + cell_w // 2
             cy_photo = grid_top + r * row_h + cfg.cell_photo // 2 + 6
 
+            move = _min_price_movement(row, prev_map.get(row.commodity))
+            st = _cell_style(move)
+            cell_pad = int(round(5 * line_scale))
+            rad = int(round(14 * line_scale))
+            cell_top = grid_top + r * row_h
+            rx0 = cell_x0 + cell_pad
+            ry0 = cell_top + cell_pad
+            rx1 = cell_x0 + cell_w - cell_pad
+            ry1 = cell_top + row_h - cell_pad
+            draw.rounded_rectangle(
+                (rx0, ry0, rx1, ry1),
+                radius=rad,
+                fill=st.fill,
+                outline=st.border,
+                width=2,
+            )
+
             term = _search_term_for_commodity(row.commodity)
             raw = _load_or_fetch_thumb(session, cache_dir, row.commodity, term)
             circ = _circle_photo_rgba(raw, cfg.cell_photo)
@@ -462,24 +558,33 @@ def render_price_grid_png(
             img.paste(circ, (paste_x, paste_y), circ)
 
             nm = _display_name(row.commodity)
-            lines = textwrap.wrap(nm, width=14)[:2]
+            wrap_w = max(14, 13 * sc)
+            lines = textwrap.wrap(nm, width=wrap_w)[:2]
             ty = paste_y + cfg.cell_photo + cfg.gap_after_photo
             for line in lines:
                 lw, lh = _text_size(draw, line, font_name)
-                draw.text((cx - lw // 2, ty), line, fill=TEXT_BODY, font=font_name)
+                draw.text((cx - lw // 2, ty), line, fill=st.name, font=font_name)
                 ty += lh + 2
 
             unit = _extract_unit(row.commodity)
             pl = _price_line(row.min_price, unit)
             pw, ph = _text_size(draw, pl, font_price)
-            draw.text((cx - pw // 2, ty + 2), pl, fill=TEXT_TITLE, font=font_price)
+            pl_y = ty + 2
+            draw.text((cx - pw // 2, pl_y), pl, fill=st.price, font=font_price)
+            bw, _ = _text_size(draw, st.badge_text, font_badge)
+            draw.text(
+                (cx - bw // 2, pl_y + ph + 4),
+                st.badge_text,
+                fill=st.badge,
+                font=font_badge,
+            )
 
         foot = "मूल्य दैनिक परिवर्तन हुन सक्छ"
         fw, fh = _text_size(draw, foot, font_foot)
         draw.text(((cfg.width - fw) // 2, height - cfg.frame_margin - cfg.footer_h // 2 - fh // 2), foot, fill=TEXT_MUTED, font=font_foot)
 
         out_path = day_dir / f"page-{page:02d}.png"
-        img.save(out_path, format="PNG", optimize=True)
+        img.save(out_path, format="PNG", optimize=True, compress_level=6)
         paths.append(out_path)
         page += 1
 

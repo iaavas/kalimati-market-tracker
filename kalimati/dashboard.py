@@ -7,7 +7,7 @@ from typing import Any
 from flask import Flask, Response, jsonify, render_template_string, request
 
 from kalimati.config import DASHBOARD_HOST, DASHBOARD_PORT
-from kalimati.db import DB_PATH, list_commodities, series_for_commodity
+from kalimati.db import DB_PATH, list_commodities, series_for_commodity, snapshot_min_price_movements
 
 # --- Reusable analytics (usable from scripts/tests without Flask) -----------------
 
@@ -74,111 +74,244 @@ PAGE = """
   <script src="https://cdn.jsdelivr.net/npm/lightweight-charts@4.2.0/dist/lightweight-charts.standalone.production.js"></script>
   <style>
     :root {
-      --bg: #eceef2;
-      --surface: #ffffff;
-      --border: #d4d8e0;
-      --text: #1c1f26;
-      --muted: #5c6370;
-      --accent: #1f6feb;
-      --accent-soft: #e8f1ff;
-      --positive: #1b7f3b;
-      --negative: #c0352b;
-      --shadow: 0 1px 2px rgba(15, 23, 42, 0.06), 0 4px 16px rgba(15, 23, 42, 0.06);
-      --radius: 12px;
-      font-family: "Segoe UI", system-ui, -apple-system, sans-serif;
+      --pbi-page: #f3f2f1;
+      --pbi-card: #ffffff;
+      --pbi-border: #edebe9;
+      --pbi-text: #323130;
+      --pbi-muted: #605e5c;
+      --pbi-accent: #0078d4;
+      --pbi-accent-hover: #106ebe;
+      --positive: #107c10;
+      --negative: #a4262c;
+      --shadow-card: 0 0.6px 1.8px rgba(0, 0, 0, 0.08), 0 3.2px 7.2px rgba(0, 0, 0, 0.12);
+      --radius: 4px;
+      font-family: "Segoe UI", "Segoe UI Web (West European)", system-ui, -apple-system, sans-serif;
     }
     * { box-sizing: border-box; }
     body {
       margin: 0;
       min-height: 100vh;
-      background: linear-gradient(180deg, #e4e7ee 0%, var(--bg) 32%);
-      color: var(--text);
+      background: var(--pbi-page);
+      color: var(--pbi-text);
+      font-size: 14px;
+      line-height: 1.45;
     }
-    .shell { max-width: 1180px; margin: 0 auto; padding: 28px 22px 40px; }
-    .title-row {
-      display: flex; flex-wrap: wrap; align-items: flex-end; justify-content: space-between;
-      gap: 16px 24px; margin-bottom: 20px;
+    .app-header {
+      background: var(--pbi-card);
+      border-bottom: 1px solid var(--pbi-border);
+      box-shadow: 0 1px 0 rgba(0, 0, 0, 0.04);
     }
-    h1 {
+    .app-header-inner {
+      max-width: 1400px;
+      margin: 0 auto;
+      padding: 16px 28px 18px;
+      display: flex;
+      flex-wrap: wrap;
+      align-items: flex-end;
+      justify-content: space-between;
+      gap: 20px 32px;
+    }
+    .brand { display: flex; align-items: flex-start; gap: 14px; }
+    .brand-mark {
+      width: 4px;
+      min-height: 44px;
+      background: var(--pbi-accent);
+      border-radius: 2px;
+      margin-top: 2px;
+      flex-shrink: 0;
+    }
+    .brand h1 {
       margin: 0;
-      font-size: 1.35rem;
-      font-weight: 650;
-      letter-spacing: -0.02em;
+      font-size: 20px;
+      font-weight: 600;
+      color: var(--pbi-text);
+      letter-spacing: -0.01em;
     }
-    .subtitle { margin: 6px 0 0; font-size: 0.875rem; color: var(--muted); max-width: 520px; line-height: 1.45; }
+    .brand-sub {
+      margin: 4px 0 0;
+      font-size: 12px;
+      color: var(--pbi-muted);
+      max-width: 420px;
+      line-height: 1.4;
+    }
     .filters {
-      display: flex; flex-wrap: wrap; gap: 14px 18px; align-items: flex-end;
-      background: var(--surface);
-      padding: 14px 16px;
-      border-radius: var(--radius);
-      border: 1px solid var(--border);
-      box-shadow: var(--shadow);
+      display: flex;
+      flex-wrap: wrap;
+      gap: 16px 20px;
+      align-items: flex-end;
     }
-    .field { display: flex; flex-direction: column; gap: 6px; }
-    .field label { font-size: 0.72rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.06em; color: var(--muted); }
+    .field { display: flex; flex-direction: column; gap: 4px; }
+    .field label {
+      font-size: 11px;
+      font-weight: 600;
+      color: var(--pbi-muted);
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+    }
     select {
-      min-width: 240px;
-      padding: 9px 11px;
-      border-radius: 8px;
-      border: 1px solid var(--border);
-      background: var(--surface);
-      color: var(--text);
-      font-size: 0.9rem;
+      min-width: 220px;
+      height: 32px;
+      padding: 0 28px 0 10px;
+      border-radius: 2px;
+      border: 1px solid #8a8886;
+      background: var(--pbi-card);
+      color: var(--pbi-text);
+      font-size: 14px;
+      font-family: inherit;
+      cursor: pointer;
     }
-    select:focus { outline: 2px solid var(--accent-soft); border-color: var(--accent); }
+    select:hover { border-color: var(--pbi-text); }
+    select:focus {
+      outline: none;
+      border-color: var(--pbi-accent);
+      box-shadow: 0 0 0 1px var(--pbi-accent);
+    }
+    .app-main {
+      max-width: 1400px;
+      margin: 0 auto;
+      padding: 20px 28px 36px;
+    }
+    .content-grid { display: flex; flex-direction: column; gap: 16px; }
+    .card {
+      background: var(--pbi-card);
+      border: 1px solid var(--pbi-border);
+      border-radius: var(--radius);
+      box-shadow: var(--shadow-card);
+    }
+    .card-pad { padding: 16px 20px 18px; }
     .kpis {
       display: grid;
-      grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
-      gap: 14px;
-      margin-top: 18px;
+      grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+      gap: 16px;
     }
     .kpi {
-      background: var(--surface);
-      border: 1px solid var(--border);
-      border-radius: var(--radius);
-      padding: 18px 18px 16px;
-      box-shadow: var(--shadow);
-      border-top: 3px solid var(--accent);
+      padding: 16px 18px;
+      border-left: 3px solid var(--pbi-accent);
+      background: var(--pbi-card);
     }
-    .kpi-label { font-size: 0.72rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.06em; color: var(--muted); }
-    .kpi-value { margin-top: 8px; font-size: 1.75rem; font-weight: 700; letter-spacing: -0.03em; }
-    .kpi-foot { margin-top: 10px; font-size: 0.8125rem; color: var(--muted); }
+    .kpi-label {
+      font-size: 11px;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+      color: var(--pbi-muted);
+    }
+    .kpi-value {
+      margin-top: 6px;
+      font-size: 28px;
+      font-weight: 600;
+      color: var(--pbi-text);
+      letter-spacing: -0.02em;
+      line-height: 1.2;
+    }
+    .kpi-foot { margin-top: 8px; font-size: 12px; color: var(--pbi-muted); }
     .kpi-delta.positive { color: var(--positive); font-weight: 600; }
     .kpi-delta.negative { color: var(--negative); font-weight: 600; }
-    .chart-card {
-      margin-top: 18px;
-      background: var(--surface);
-      border: 1px solid var(--border);
-      border-radius: var(--radius);
-      padding: 16px 14px 8px;
-      box-shadow: var(--shadow);
+    .card-title-row {
+      display: flex;
+      justify-content: space-between;
+      align-items: baseline;
+      flex-wrap: wrap;
+      gap: 8px 16px;
+      padding: 14px 20px 0;
+      margin-bottom: 4px;
     }
-    .chart-head {
-      display: flex; justify-content: space-between; align-items: baseline; flex-wrap: wrap;
-      gap: 8px; padding: 0 6px 12px;
+    .card-title-row strong {
+      font-size: 14px;
+      font-weight: 600;
+      color: var(--pbi-text);
     }
-    .chart-head span { font-size: 0.875rem; color: var(--muted); }
+    .card-title-row span { font-size: 12px; color: var(--pbi-muted); }
+    .chart-card .card-title-row { margin-bottom: 0; padding-bottom: 8px; }
+    .movements-card .movements-grid { padding: 8px 20px 18px; margin-top: 0; }
+    .movements-grid {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 12px;
+    }
+    @media (max-width: 900px) {
+      .movements-grid { grid-template-columns: 1fr; }
+    }
+    .move-col {
+      border-radius: 2px;
+      padding: 12px 12px 10px;
+      border: 1px solid var(--pbi-border);
+      background: #faf9f8;
+      min-height: 100px;
+    }
+    .move-col.move-down { border-top: 2px solid var(--positive); }
+    .move-col.move-up { border-top: 2px solid var(--negative); }
+    .move-col.move-neutral { border-top: 2px solid #a19f9d; }
+    .move-col h3 {
+      margin: 0 0 8px;
+      font-size: 11px;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+      color: var(--pbi-muted);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+    }
+    .move-col h3 .n {
+      font-weight: 600;
+      color: var(--pbi-text);
+      font-size: 13px;
+    }
+    .move-col ul {
+      list-style: none;
+      margin: 0;
+      padding: 0;
+      max-height: 260px;
+      overflow-y: auto;
+    }
+    .move-col li {
+      padding: 8px 0;
+      border-bottom: 1px solid var(--pbi-border);
+      font-size: 12px;
+    }
+    .move-col li:last-child { border-bottom: none; }
+    .move-name { display: block; font-weight: 600; color: var(--pbi-text); line-height: 1.35; }
+    .move-detail { display: block; font-size: 11px; color: var(--pbi-muted); margin-top: 2px; }
+    .movements-empty {
+      padding: 24px 20px;
+      text-align: center;
+      color: var(--pbi-muted);
+      font-size: 13px;
+    }
     #chart {
-      width: 100%;
-      height: 420px;
+      height: 440px;
       position: relative;
-      border-radius: 10px;
+      width: calc(100% - 24px);
+      margin: 0 12px 14px;
+      border-radius: 2px;
       overflow: hidden;
+      border: 1px solid var(--pbi-border);
+      background: #fff;
     }
     footer.muted {
-      margin-top: 18px; font-size: 0.8125rem; color: var(--muted); line-height: 1.5;
+      margin-top: 20px;
+      padding-top: 16px;
+      border-top: 1px solid var(--pbi-border);
+      font-size: 12px;
+      color: var(--pbi-muted);
+      line-height: 1.55;
     }
-    footer.muted a { color: var(--accent); text-decoration: none; }
-    footer.muted a:hover { text-decoration: underline; }
-    code { font-size: 0.85em; background: #f0f2f7; padding: 2px 6px; border-radius: 4px; }
+    footer.muted a { color: var(--pbi-accent); text-decoration: none; }
+    footer.muted a:hover { color: var(--pbi-accent-hover); text-decoration: underline; }
+    code { font-size: 0.92em; background: #f3f2f1; padding: 2px 6px; border-radius: 2px; border: 1px solid var(--pbi-border); }
   </style>
 </head>
 <body>
-  <div class="shell">
-    <div class="title-row">
-      <div>
-        <h1>Kalimati market prices</h1>
-        <p class="subtitle">Candlesticks (TradingView Lightweight Charts): wicks = min–max range; body = prior day’s average → today’s average (green when the average drops). Change commodity and window below.</p>
+  <header class="app-header">
+    <div class="app-header-inner">
+      <div class="brand">
+        <span class="brand-mark" aria-hidden="true"></span>
+        <div>
+          <h1>Kalimati market prices</h1>
+          <p class="brand-sub">Candlestick series (min–max wicks, prior vs current average in the body). Pick a commodity and range.</p>
+        </div>
       </div>
       <div class="filters">
         <div class="field">
@@ -196,33 +329,61 @@ PAGE = """
         </div>
       </div>
     </div>
+  </header>
 
-    <div class="kpis">
-      <div class="kpi">
-        <div class="kpi-label">Latest average</div>
-        <div class="kpi-value" id="kpi-avg">—</div>
-        <div class="kpi-foot" id="kpi-day">No day selected</div>
-      </div>
-      <div class="kpi">
-        <div class="kpi-label">Vs prior snapshot</div>
-        <div class="kpi-value" id="kpi-delta">—</div>
-        <div class="kpi-foot" id="kpi-delta-note">Change in average price</div>
-      </div>
-    </div>
+  <main class="app-main">
+    <div class="content-grid">
+      <section class="card card-pad">
+        <div class="kpis">
+          <div class="kpi">
+            <div class="kpi-label">Latest average</div>
+            <div class="kpi-value" id="kpi-avg">—</div>
+            <div class="kpi-foot" id="kpi-day">No day selected</div>
+          </div>
+          <div class="kpi">
+            <div class="kpi-label">Vs prior snapshot</div>
+            <div class="kpi-value" id="kpi-delta">—</div>
+            <div class="kpi-foot" id="kpi-delta-note">Change in average price</div>
+          </div>
+        </div>
+      </section>
 
-    <div class="chart-card">
-      <div class="chart-head">
-        <strong id="chart-title">Price trend</strong>
-        <span id="chart-range"></span>
-      </div>
-      <div id="chart" role="img" aria-label="Price candlestick chart"></div>
+      <section class="card movements-card" id="movements-card">
+        <div class="card-title-row">
+          <strong>Min wholesale price vs prior day</strong>
+          <span id="movements-range">—</span>
+        </div>
+        <div id="movements-empty" class="movements-empty" hidden>No SQLite data yet. Run <code>scripts/daily_job.py</code>.</div>
+        <div class="movements-grid" id="movements-grid">
+          <div class="move-col move-down">
+            <h3>Price down <span class="n" id="cnt-down">0</span></h3>
+            <ul id="list-down" aria-label="Commodities with lower minimum price"></ul>
+          </div>
+          <div class="move-col move-up">
+            <h3>Price up <span class="n" id="cnt-up">0</span></h3>
+            <ul id="list-up" aria-label="Commodities with higher minimum price"></ul>
+          </div>
+          <div class="move-col move-neutral">
+            <h3>Neutral <span class="n" id="cnt-neutral">0</span></h3>
+            <ul id="list-neutral" aria-label="Unchanged or not comparable"></ul>
+          </div>
+        </div>
+      </section>
+
+      <section class="card chart-card">
+        <div class="card-title-row">
+          <strong id="chart-title">Price trend</strong>
+          <span id="chart-range"></span>
+        </div>
+        <div id="chart" role="img" aria-label="Price candlestick chart"></div>
+      </section>
     </div>
 
     <footer class="muted">
       Data source: local SQLite (<code>data/prices.db</code>). Refresh with <code>scripts/daily_job.py</code>.
       Website: <a href="https://kalimatimarket.gov.np/" target="_blank" rel="noreferrer">kalimatimarket.gov.np</a>
     </footer>
-  </div>
+  </main>
 
   <script>
     let tvChart = null;
@@ -387,7 +548,7 @@ PAGE = """
       }
 
       const candleData = buildCandleData(payload.points);
-      const h = 420;
+      const h = 440;
 
       document.getElementById('chart-title').textContent = (payload.commodity || 'Price') + ' · candlestick';
       const r = payload.period === 'all' ? 'Full history' : 'Last ' + payload.period + ' days';
@@ -400,28 +561,28 @@ PAGE = """
         height: h,
         layout: {
           background: { type: L.ColorType.Solid, color: '#ffffff' },
-          textColor: '#5c6370',
+          textColor: '#605e5c',
           fontSize: 12,
-          fontFamily: '"Segoe UI", system-ui, -apple-system, sans-serif',
+          fontFamily: '"Segoe UI", "Segoe UI Web (West European)", system-ui, sans-serif',
         },
         localization: {
           priceFormatter: (price) => 'NPR ' + fmtNpr(price),
         },
         grid: {
-          vertLines: { color: '#eceef2' },
-          horzLines: { color: '#eceef2' },
+          vertLines: { color: '#edebe9' },
+          horzLines: { color: '#edebe9' },
         },
         crosshair: {
           mode: L.CrosshairMode.Normal,
-          vertLine: { color: '#c5cad6', labelBackgroundColor: '#1f6feb' },
-          horzLine: { color: '#c5cad6', labelBackgroundColor: '#1f6feb' },
+          vertLine: { color: '#c8c6c4', labelBackgroundColor: '#0078d4' },
+          horzLine: { color: '#c8c6c4', labelBackgroundColor: '#0078d4' },
         },
         rightPriceScale: {
-          borderColor: '#d4d8e0',
+          borderColor: '#edebe9',
           scaleMargins: { top: 0.06, bottom: 0.1 },
         },
         timeScale: {
-          borderColor: '#d4d8e0',
+          borderColor: '#edebe9',
           timeVisible: false,
           secondsVisible: false,
           fixLeftEdge: false,
@@ -481,7 +642,82 @@ PAGE = """
       if (sel.value) loadSeries(sel.value);
     });
 
+    function renderMovements(m) {
+      const emptyEl = document.getElementById('movements-empty');
+      const gridEl = document.getElementById('movements-grid');
+      const rangeEl = document.getElementById('movements-range');
+      const ul = (id) => document.getElementById(id);
+
+      for (const id of ['list-down', 'list-up', 'list-neutral']) {
+        ul(id).innerHTML = '';
+      }
+
+      if (!m || !m.has_data) {
+        emptyEl.hidden = false;
+        gridEl.hidden = true;
+        rangeEl.textContent = '—';
+        document.getElementById('cnt-down').textContent = '0';
+        document.getElementById('cnt-up').textContent = '0';
+        document.getElementById('cnt-neutral').textContent = '0';
+        return;
+      }
+
+      emptyEl.hidden = true;
+      gridEl.hidden = false;
+
+      const ld = m.latest_day || '';
+      const pd = m.prior_day;
+      rangeEl.textContent = pd
+        ? (ld + ' vs ' + pd + ' · min price')
+        : (ld + ' · no prior day in DB (all neutral)');
+
+      function fillList(listId, items) {
+        const root = ul(listId);
+        for (const it of items) {
+          const li = document.createElement('li');
+          const name = document.createElement('span');
+          name.className = 'move-name';
+          name.textContent = it.commodity;
+          li.appendChild(name);
+          const detail = document.createElement('span');
+          detail.className = 'move-detail';
+          if (it.delta != null && it.prior_min != null && it.min != null) {
+            const sign = it.delta > 0 ? '+' : '';
+            detail.textContent = 'NPR ' + fmtNpr(it.prior_min) + ' → ' + fmtNpr(it.min)
+              + ' (' + sign + fmtNpr(it.delta) + ')';
+          } else if (it.min != null && it.prior_min == null) {
+            detail.textContent = 'NPR ' + fmtNpr(it.min) + ' · no prior row';
+          } else if (it.min == null) {
+            detail.textContent = 'No min price';
+          } else {
+            detail.textContent = 'NPR ' + fmtNpr(it.min) + ' · same vs prior';
+          }
+          li.appendChild(detail);
+          root.appendChild(li);
+        }
+      }
+
+      fillList('list-down', m.down || []);
+      fillList('list-up', m.up || []);
+      fillList('list-neutral', m.neutral || []);
+
+      document.getElementById('cnt-down').textContent = String((m.down || []).length);
+      document.getElementById('cnt-up').textContent = String((m.up || []).length);
+      document.getElementById('cnt-neutral').textContent = String((m.neutral || []).length);
+    }
+
+    async function loadMovements() {
+      try {
+        const res = await fetch('/api/movements');
+        const m = await res.json();
+        renderMovements(m);
+      } catch (e) {
+        renderMovements({ has_data: false });
+      }
+    }
+
     loadCommodities();
+    loadMovements();
   </script>
 </body>
 </html>
@@ -517,6 +753,10 @@ def create_app(db_path: Path | None = None) -> Flask:
                 "kpis": kpis,
             }
         )
+
+    @app.get("/api/movements")
+    def movements() -> Response:
+        return jsonify(snapshot_min_price_movements(path))
 
     return app
 
